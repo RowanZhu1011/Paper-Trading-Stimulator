@@ -9,12 +9,8 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATA_DIR
-        value: /var/data
+        value: /tmp/stock-practice-data
       - key: APP_PASSWORD
         sync: false
       - key: SESSION_SECRET
         generateValue: true
-    disk:
-      name: stock-practice-data
-      mountPath: /var/data
-      sizeGB: 1
