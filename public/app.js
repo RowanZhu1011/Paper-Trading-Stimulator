@@ -1,6 +1,9 @@
 let state = null;
 let stocks = [];
 let quotes = [];
+let candles = [];
+let chartSource = "";
+let sources = [];
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value, currency = "CNY") => new Intl.NumberFormat("zh-CN", {
@@ -58,7 +61,7 @@ function renderSummary() {
     if (position.currency === "CNY") cnyPositions += value;
     else usdPositions += value;
   }
-  const usdToCny = 7.2;
+  const usdToCny = state.settings.usdToCny;
   const total = state.cash.CNY + cnyPositions + (state.cash.USD + usdPositions) * usdToCny;
   $("#totalAsset").textContent = money(total, "CNY");
   $("#cashCny").textContent = money(state.cash.CNY, "CNY");
@@ -94,16 +97,58 @@ function renderQuotes() {
           <div class="sub">规则</div>
           <div>${quote.lotSize} 股/手</div>
         </div>
-        <button class="secondary" data-trade="${quote.symbol}">交易</button>
+        <div class="row-actions">
+          <button class="secondary" data-chart="${quote.symbol}">图表</button>
+          <button class="secondary" data-trade="${quote.symbol}">交易</button>
+        </div>
       </article>
     `;
   }).join("");
+  document.querySelectorAll("[data-chart]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      $("#chartSymbol").value = button.dataset.chart;
+      activateTab("chart");
+      await loadChart();
+    });
+  });
   document.querySelectorAll("[data-trade]").forEach((button) => {
     button.addEventListener("click", () => {
       $("#symbolInput").value = button.dataset.trade;
       activateTab("trade");
     });
   });
+}
+
+function renderAccount() {
+  $("#accountAStatus").textContent = state.accounts.A.opened ? "已开通" : "未开通";
+  $("#accountUSStatus").textContent = state.accounts.US.opened ? "已开通" : "未开通";
+  for (const [key, value] of Object.entries(state.settings)) {
+    const input = $(`#${key}`);
+    if (input) input.value = value;
+  }
+}
+
+function renderSources() {
+  $("#sourceList").innerHTML = sources.map((source) => `
+    <article class="source-card">
+      <div class="name">${source.name}</div>
+      <div class="sub">${source.markets.join(" / ")}</div>
+      <p>${source.usage}</p>
+    </article>
+  `).join("");
+  $("#sourceHitList").innerHTML = quotes.length ? quotes.map((quote) => `
+    <article class="position-row">
+      <div>
+        <div class="name">${quote.name}</div>
+        <div class="sub">${quote.symbol}</div>
+      </div>
+      <div><div class="sub">市场</div><div>${quote.market === "A" ? "A股" : "美股"}</div></div>
+      <div><div class="sub">当前来源</div><div>${quote.source}</div></div>
+      <div><div class="sub">更新时间</div><div>${new Date(quote.time).toLocaleTimeString("zh-CN")}</div></div>
+      <div><div class="sub">现价</div><div>${money(quote.price, quote.currency)}</div></div>
+      <div><div class="sub">涨跌幅</div><div class="${quote.changePct >= 0 ? "gain" : "loss"}">${quote.changePct >= 0 ? "+" : ""}${pct(quote.changePct)}</div></div>
+    </article>
+  `).join("") : `<p class="empty">行情读取后会显示每只股票实际命中的来源。</p>`;
 }
 
 function renderPositions() {
@@ -165,6 +210,8 @@ function renderAll() {
   renderSummary();
   renderQuotes();
   renderPositions();
+  renderAccount();
+  renderSources();
   renderJournal();
 }
 
@@ -178,9 +225,12 @@ async function loadAll() {
   hideLogin();
   const stockPayload = await api("/api/stocks");
   stocks = stockPayload.stocks;
+  sources = (await api("/api/sources")).sources;
   $("#symbolInput").innerHTML = stocks.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
+  $("#chartSymbol").innerHTML = stocks.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
   state = await api("/api/state");
   await refreshQuotes();
+  await loadChart();
 }
 
 async function refreshQuotes() {
@@ -193,6 +243,81 @@ async function refreshQuotes() {
 function activateTab(tabName) {
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabName));
+}
+
+async function loadChart() {
+  if (!$("#chartSymbol").value && stocks[0]) $("#chartSymbol").value = stocks[0].symbol;
+  const symbol = $("#chartSymbol").value || "510300.SH";
+  const range = $("#chartRange").value || "1mo";
+  const payload = await api(`/api/history?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`);
+  candles = payload.candles;
+  chartSource = payload.source;
+  $("#chartTitle").textContent = `${payload.stock.name} · ${payload.stock.symbol}`;
+  $("#chartMeta").textContent = `数据源：${chartSource}。红涨绿跌，适合观察趋势和波动，不作为投资建议。`;
+  drawKline();
+}
+
+function drawKline() {
+  const canvas = $("#klineCanvas");
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.max(640, Math.floor(rect.width * ratio));
+  canvas.height = Math.floor(420 * ratio);
+  ctx.scale(ratio, ratio);
+
+  const width = canvas.width / ratio;
+  const height = canvas.height / ratio;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fffefa";
+  ctx.fillRect(0, 0, width, height);
+  if (!candles.length) return;
+
+  const pad = { left: 54, right: 18, top: 22, bottom: 42 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+  const highs = candles.map((item) => item.high);
+  const lows = candles.map((item) => item.low);
+  const max = Math.max(...highs);
+  const min = Math.min(...lows);
+  const span = max - min || 1;
+  const y = (price) => pad.top + (max - price) / span * plotH;
+  const candleW = Math.max(4, Math.min(16, plotW / candles.length * 0.62));
+
+  ctx.strokeStyle = "#ece4d5";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#68736f";
+  ctx.font = "12px system-ui, sans-serif";
+  for (let i = 0; i <= 4; i += 1) {
+    const yy = pad.top + plotH * i / 4;
+    const price = max - span * i / 4;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, yy);
+    ctx.lineTo(width - pad.right, yy);
+    ctx.stroke();
+    ctx.fillText(price.toFixed(price < 10 ? 3 : 2), 8, yy + 4);
+  }
+
+  candles.forEach((item, index) => {
+    const x = pad.left + plotW * (index + 0.5) / candles.length;
+    const up = item.close >= item.open;
+    ctx.strokeStyle = up ? "#c62828" : "#168457";
+    ctx.fillStyle = up ? "#c62828" : "#168457";
+    ctx.beginPath();
+    ctx.moveTo(x, y(item.high));
+    ctx.lineTo(x, y(item.low));
+    ctx.stroke();
+    const top = Math.min(y(item.open), y(item.close));
+    const bottom = Math.max(y(item.open), y(item.close));
+    ctx.fillRect(x - candleW / 2, top, candleW, Math.max(2, bottom - top));
+  });
+
+  const first = candles[0];
+  const last = candles[candles.length - 1];
+  const change = ((last.close - first.close) / first.close) * 100;
+  ctx.fillStyle = change >= 0 ? "#c62828" : "#168457";
+  ctx.font = "700 14px system-ui, sans-serif";
+  ctx.fillText(`区间涨跌：${change >= 0 ? "+" : ""}${change.toFixed(2)}%`, pad.left, height - 14);
 }
 
 document.querySelectorAll(".tab").forEach((button) => {
@@ -249,6 +374,45 @@ $("#resetBtn").addEventListener("click", async () => {
   if (!confirm("确定要重置账户、订单和复盘吗？")) return;
   state = await api("/api/reset", { method: "POST", body: "{}" });
   await refreshQuotes();
+});
+
+$("#chartSymbol").addEventListener("change", loadChart);
+$("#chartRange").addEventListener("change", loadChart);
+window.addEventListener("resize", () => {
+  if (candles.length) drawKline();
+});
+
+$("#depositForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    state = await api("/api/deposit", {
+      method: "POST",
+      body: JSON.stringify({
+        currency: $("#depositCurrency").value,
+        amount: Number($("#depositAmount").value)
+      })
+    });
+    $("#accountMessage").textContent = "模拟入金成功。";
+    renderAll();
+  } catch (error) {
+    $("#accountMessage").textContent = error.message;
+  }
+});
+
+$("#settingsForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = {};
+  for (const key of Object.keys(state.settings)) body[key] = Number($(`#${key}`).value);
+  try {
+    state = await api("/api/settings", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    $("#accountMessage").textContent = "费用参数已保存。";
+    renderAll();
+  } catch (error) {
+    $("#accountMessage").textContent = error.message;
+  }
 });
 
 $("#loginForm").addEventListener("submit", async (event) => {
