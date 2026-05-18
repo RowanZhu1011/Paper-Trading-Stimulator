@@ -4,6 +4,7 @@ let quotes = [];
 let candles = [];
 let chartSource = "";
 let sources = [];
+let authMode = "login";
 
 const $ = (selector) => document.querySelector(selector);
 const money = (value, currency = "CNY") => new Intl.NumberFormat("zh-CN", {
@@ -100,10 +101,20 @@ function renderQuotes() {
         <div class="row-actions">
           <button class="secondary" data-chart="${quote.symbol}">图表</button>
           <button class="secondary" data-trade="${quote.symbol}">交易</button>
+          <button class="secondary danger" data-remove-watch="${quote.symbol}">移除</button>
         </div>
       </article>
     `;
   }).join("");
+  document.querySelectorAll("[data-remove-watch]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state = await api("/api/watchlist", {
+        method: "POST",
+        body: JSON.stringify({ symbol: button.dataset.removeWatch, action: "remove" })
+      });
+      await refreshQuotes();
+    });
+  });
   document.querySelectorAll("[data-chart]").forEach((button) => {
     button.addEventListener("click", async () => {
       $("#chartSymbol").value = button.dataset.chart;
@@ -173,16 +184,36 @@ function renderPositions() {
     `;
   }).join("") : `<p class="empty">还没有持仓。可以先从 ETF 开始做小仓位练习。</p>`;
 
-  $("#orderList").innerHTML = state.orders.length ? state.orders.slice(0, 12).map((order) => `
+  $("#orderList").innerHTML = state.orders.length ? state.orders.slice(0, 14).map((order) => `
     <article class="history-item">
       <div>
         <div class="name">${order.side === "buy" ? "买入" : "卖出"} ${order.name}</div>
         <div class="sub">${new Date(order.createdAt).toLocaleString("zh-CN")}</div>
       </div>
-      <div>${order.quantity} 股 · ${money(order.price, order.currency)} · 费用 ${money(order.fee, order.currency)}</div>
-      <div class="sub">${order.reason}</div>
+      <div>${order.quantity} 股 · ${money(order.price, order.currency)} · ${order.status === "pending" ? "待成交" : "已成交"} · 费用 ${money(order.fee, order.currency)}</div>
+      <div class="sub">${order.status === "pending" ? `<button class="secondary danger" data-cancel-order="${order.id}">撤单</button>` : order.reason}</div>
     </article>
   `).join("") : `<p class="empty">暂无订单。</p>`;
+  document.querySelectorAll("[data-cancel-order]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state = await api("/api/cancel-order", {
+        method: "POST",
+        body: JSON.stringify({ id: button.dataset.cancelOrder })
+      });
+      renderAll();
+    });
+  });
+
+  $("#cashflowList").innerHTML = state.cashflows && state.cashflows.length ? state.cashflows.slice(0, 12).map((flow) => `
+    <article class="history-item">
+      <div>
+        <div class="name">${flow.type === "deposit" ? "入金" : flow.type === "buy" ? "买入支出" : "卖出收入"}</div>
+        <div class="sub">${new Date(flow.createdAt).toLocaleString("zh-CN")}</div>
+      </div>
+      <div class="${flow.amount >= 0 ? "gain" : "loss"}">${money(flow.amount, flow.currency)}</div>
+      <div class="sub">${flow.memo}</div>
+    </article>
+  `).join("") : `<p class="empty">暂无资金流水。</p>`;
 }
 
 function renderJournal() {
@@ -217,7 +248,9 @@ function renderAll() {
 
 async function loadAll() {
   const auth = await api("/api/auth/status");
-  $("#logoutBtn").hidden = !auth.required;
+  $("#logoutBtn").hidden = !auth.authed;
+  $("#userPill").hidden = !auth.authed;
+  if (auth.user) $("#userPill").textContent = auth.user.username;
   if (auth.required && !auth.authed) {
     showLogin();
     return;
@@ -228,6 +261,7 @@ async function loadAll() {
   sources = (await api("/api/sources")).sources;
   $("#symbolInput").innerHTML = stocks.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
   $("#chartSymbol").innerHTML = stocks.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
+  $("#watchSymbol").innerHTML = stocks.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
   state = await api("/api/state");
   await refreshQuotes();
   await loadChart();
@@ -326,6 +360,14 @@ document.querySelectorAll(".tab").forEach((button) => {
 
 $("#refreshBtn").addEventListener("click", refreshQuotes);
 
+$("#addWatchBtn").addEventListener("click", async () => {
+  state = await api("/api/watchlist", {
+    method: "POST",
+    body: JSON.stringify({ symbol: $("#watchSymbol").value, action: "add" })
+  });
+  await refreshQuotes();
+});
+
 $("#orderForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("#orderMessage").textContent = "正在提交模拟订单...";
@@ -417,18 +459,34 @@ $("#settingsForm").addEventListener("submit", async (event) => {
 
 $("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  $("#loginMessage").textContent = "正在登录...";
+  $("#loginMessage").textContent = authMode === "login" ? "正在登录..." : "正在注册...";
   try {
-    await api("/api/auth/login", {
+    await api(authMode === "login" ? "/api/auth/login" : "/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ password: $("#passwordInput").value })
+      body: JSON.stringify({
+        username: $("#usernameInput").value,
+        password: $("#passwordInput").value,
+        invite: $("#inviteInput").value
+      })
     });
+    $("#usernameInput").value = "";
     $("#passwordInput").value = "";
+    $("#inviteInput").value = "";
     $("#loginMessage").textContent = "";
     await loadAll();
   } catch (error) {
     $("#loginMessage").textContent = error.message;
   }
+});
+
+$("#authModeBtn").addEventListener("click", () => {
+  authMode = authMode === "login" ? "register" : "login";
+  const registering = authMode === "register";
+  $("#loginTitle").textContent = registering ? "注册模拟账户" : "登录模拟账户";
+  $("#loginHelp").textContent = registering ? "创建用户名和密码；邀请码填写你部署时设置的 APP_PASSWORD。" : "输入用户名和密码，进入你的独立模拟账户。";
+  $("#inviteInput").hidden = !registering;
+  $("#authModeBtn").textContent = registering ? "已有账户，去登录" : "注册新账户";
+  $("#loginMessage").textContent = "";
 });
 
 $("#logoutBtn").addEventListener("click", async () => {
