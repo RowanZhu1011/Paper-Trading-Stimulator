@@ -18,7 +18,9 @@ DATA_DIR=/var/data
 SESSION_SECRET=一串随机长字符
 ```
 
-设置 `APP_PASSWORD` 后，打开网页会先要求登录。
+设置 `APP_PASSWORD` 后，新用户注册时需要把它作为邀请码。注册后每个用户名都有独立的模拟账户、现金、持仓、自选和复盘。
+
+Render 免费版请使用项目里的默认 `render.yaml`，它不会配置持久磁盘；长期使用再升级持久存储。
 
 ## 启动
 

@@ -52,6 +52,7 @@ function defaultState() {
     cash: { CNY: 100000, USD: 10000 },
     positions: {},
     orders: [],
+    cashflows: [],
     journal: [],
     watchlist: ["510300.SH", "159915.SZ", "600519.SH", "AAPL", "MSFT", "NVDA", "SPY"],
     createdAt: new Date().toISOString()
@@ -61,18 +62,48 @@ function defaultState() {
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
   if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(defaultState(), null, 2));
+    fs.writeFileSync(DATA_FILE, JSON.stringify(defaultDb(), null, 2));
   }
 }
 
-function readState() {
-  ensureDataFile();
-  return normalizeState(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+function defaultDb() {
+  return {
+    version: 2,
+    users: {},
+    sessions: {},
+    createdAt: new Date().toISOString()
+  };
 }
 
-function writeState(state) {
-  normalizeState(state);
-  fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2));
+function readDb() {
+  ensureDataFile();
+  const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  if (parsed.version === 2 && parsed.users) return parsed;
+  const db = defaultDb();
+  const user = createUserRecord("demo", APP_PASSWORD || "demo123456", normalizeState(parsed));
+  db.users[user.id] = user;
+  writeDb(db);
+  return db;
+}
+
+function writeDb(db) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
+}
+
+function readState(req) {
+  const user = currentUser(req);
+  if (!user) return null;
+  return normalizeState(user.state);
+}
+
+function writeState(req, state) {
+  const db = readDb();
+  const userId = currentUserId(req, db);
+  if (!userId || !db.users[userId]) return false;
+  db.users[userId].state = normalizeState(state);
+  db.users[userId].updatedAt = new Date().toISOString();
+  writeDb(db);
+  return true;
 }
 
 function normalizeState(state) {
@@ -82,9 +113,39 @@ function normalizeState(state) {
   state.cash = { ...defaults.cash, ...(state.cash || {}) };
   state.positions = state.positions || {};
   state.orders = state.orders || [];
+  state.cashflows = state.cashflows || [];
   state.journal = state.journal || [];
   state.watchlist = state.watchlist || defaults.watchlist;
   return state;
+}
+
+function normalizeUsername(username) {
+  return String(username || "").trim().toLowerCase().replace(/[^a-z0-9_\u4e00-\u9fa5.-]/g, "").slice(0, 24);
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
+  return { salt, hash };
+}
+
+function verifyPassword(password, user) {
+  if (!user || !user.salt || !user.passwordHash) return false;
+  const { hash } = hashPassword(password, user.salt);
+  return hash.length === user.passwordHash.length && crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(user.passwordHash));
+}
+
+function createUserRecord(username, password, state = defaultState()) {
+  const { salt, hash } = hashPassword(password);
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    username,
+    salt,
+    passwordHash: hash,
+    state: normalizeState(state),
+    createdAt: now,
+    updatedAt: now
+  };
 }
 
 function json(res, status, body) {
@@ -113,14 +174,34 @@ function sessionToken() {
   return `${value}.${sign(value)}`;
 }
 
+function userSessionToken(sessionId) {
+  return `${sessionId}.${sign(sessionId)}`;
+}
+
+function currentSessionId(req) {
+  const token = cookieValue(req, "spl_user_session");
+  const [sessionId, signature] = token.split(".");
+  if (!sessionId || !signature) return "";
+  const expected = sign(sessionId);
+  if (signature.length !== expected.length) return "";
+  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return "";
+  return sessionId;
+}
+
+function currentUserId(req, db = readDb()) {
+  const sessionId = currentSessionId(req);
+  const session = sessionId && db.sessions[sessionId];
+  return session && db.users[session.userId] ? session.userId : "";
+}
+
+function currentUser(req) {
+  const db = readDb();
+  const userId = currentUserId(req, db);
+  return userId ? db.users[userId] : null;
+}
+
 function isAuthed(req) {
-  if (!APP_PASSWORD) return true;
-  const token = cookieValue(req, "spl_session");
-  const [value, signature] = token.split(".");
-  if (!value || !signature) return false;
-  const expected = sign(value);
-  if (signature.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  return Boolean(currentUser(req));
 }
 
 function setSessionCookie(res) {
@@ -128,8 +209,16 @@ function setSessionCookie(res) {
   res.setHeader("Set-Cookie", `spl_session=${encodeURIComponent(sessionToken())}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`);
 }
 
+function setUserSessionCookie(res, sessionId) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `spl_user_session=${encodeURIComponent(userSessionToken(sessionId))}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`);
+}
+
 function clearSessionCookie(res) {
-  res.setHeader("Set-Cookie", "spl_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+  res.setHeader("Set-Cookie", [
+    "spl_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
+    "spl_user_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
+  ]);
 }
 
 function readBody(req) {
@@ -443,8 +532,7 @@ function canSellToday(state, symbol, quantity) {
   return quantity <= (position.sellable || 0);
 }
 
-async function placeOrder(body) {
-  const state = readState();
+async function placeOrder(body, state) {
   const stock = stockMap.get(body.symbol);
   if (!stock) return { status: 400, body: { error: "不支持的股票代码" } };
   const side = body.side === "sell" ? "sell" : "buy";
@@ -467,6 +555,38 @@ async function placeOrder(body) {
     if (price > dailyLimit || price < dailyFloor) {
       return { status: 400, body: { error: "价格超过 A 股涨跌停模拟范围" } };
     }
+  }
+
+  const orderBase = {
+    id: crypto.randomUUID(),
+    symbol: stock.symbol,
+    name: stock.name,
+    market: stock.market,
+    currency: stock.currency,
+    side,
+    quantity,
+    price,
+    fee,
+    amount: Number(amount.toFixed(2)),
+    reason,
+    orderType: body.orderType || "market",
+    createdAt: now
+  };
+
+  const isPendingLimit = body.orderType === "limit" && ((side === "buy" && price < quote.price) || (side === "sell" && price > quote.price));
+  if (isPendingLimit) {
+    const current = state.positions[stock.symbol];
+    if (side === "sell" && (!current || current.quantity < quantity)) return { status: 400, body: { error: "持仓不足" } };
+    const order = { ...orderBase, status: "pending", fee: 0, amount: Number(amount.toFixed(2)) };
+    state.orders.unshift(order);
+    state.journal.unshift({
+      id: crypto.randomUUID(),
+      createdAt: now,
+      symbol: stock.symbol,
+      title: `提交限价委托 ${stock.name}`,
+      content: `${reason} 当前价 ${quote.price}，委托价 ${price}，暂未成交。`
+    });
+    return { status: 200, body: { order, state } };
   }
 
   if (side === "buy") {
@@ -499,22 +619,16 @@ async function placeOrder(body) {
     if (current.quantity === 0) delete state.positions[stock.symbol];
   }
 
-  const order = {
-    id: crypto.randomUUID(),
-    symbol: stock.symbol,
-    name: stock.name,
-    market: stock.market,
-    currency: stock.currency,
-    side,
-    quantity,
-    price,
-    fee,
-    amount: Number(amount.toFixed(2)),
-    reason,
-    orderType: body.orderType || "market",
-    createdAt: now
-  };
+  const order = { ...orderBase, status: "filled" };
   state.orders.unshift(order);
+  state.cashflows.unshift({
+    id: crypto.randomUUID(),
+    createdAt: now,
+    currency: stock.currency,
+    type: side === "buy" ? "buy" : "sell",
+    amount: Number((side === "buy" ? -(amount + fee) : amount - fee).toFixed(2)),
+    memo: `${side === "buy" ? "买入" : "卖出"} ${stock.name} ${quantity} 股，费用 ${fee}`
+  });
   state.journal.unshift({
     id: crypto.randomUUID(),
     createdAt: now,
@@ -522,7 +636,6 @@ async function placeOrder(body) {
     title: `${side === "buy" ? "买入" : "卖出"} ${stock.name}`,
     content: reason
   });
-  writeState(state);
   return { status: 200, body: { order, state } };
 }
 
@@ -532,30 +645,67 @@ function resetNextTradingDay(state) {
     position.sellable = position.quantity;
   }
   state.lastRollover = new Date().toISOString();
-  writeState(state);
   return state;
 }
 
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/auth/status") {
-    return json(res, 200, { required: Boolean(APP_PASSWORD), authed: isAuthed(req) });
+    const db = readDb();
+    const userId = currentUserId(req, db);
+    return json(res, 200, {
+      required: true,
+      authed: Boolean(userId),
+      user: userId ? { username: db.users[userId].username } : null,
+      inviteRequired: Boolean(APP_PASSWORD),
+      usersCount: Object.keys(db.users).length
+    });
   }
   if (url.pathname === "/api/auth/login" && req.method === "POST") {
+    const db = readDb();
     const body = await readBody(req);
-    if (!APP_PASSWORD || String(body.password || "") === APP_PASSWORD) {
-      setSessionCookie(res);
-      return json(res, 200, { ok: true });
+    const username = normalizeUsername(body.username || "demo");
+    const user = Object.values(db.users).find((item) => item.username === username);
+    if (verifyPassword(body.password || "", user)) {
+      const sessionId = crypto.randomUUID();
+      db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
+      writeDb(db);
+      setUserSessionCookie(res, sessionId);
+      return json(res, 200, { ok: true, user: { username: user.username } });
     }
-    return json(res, 401, { error: "密码不正确" });
+    return json(res, 401, { error: "用户名或密码不正确" });
+  }
+  if (url.pathname === "/api/auth/register" && req.method === "POST") {
+    const db = readDb();
+    const body = await readBody(req);
+    const username = normalizeUsername(body.username);
+    const password = String(body.password || "");
+    const invite = String(body.invite || "");
+    if (!username || username.length < 2) return json(res, 400, { error: "用户名至少 2 个字符" });
+    if (password.length < 6) return json(res, 400, { error: "密码至少 6 位" });
+    if (APP_PASSWORD && invite !== APP_PASSWORD) return json(res, 403, { error: "邀请码不正确" });
+    if (Object.values(db.users).some((item) => item.username === username)) {
+      return json(res, 400, { error: "这个用户名已经被注册" });
+    }
+    const user = createUserRecord(username, password);
+    db.users[user.id] = user;
+    const sessionId = crypto.randomUUID();
+    db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
+    writeDb(db);
+    setUserSessionCookie(res, sessionId);
+    return json(res, 200, { ok: true, user: { username } });
   }
   if (url.pathname === "/api/auth/logout" && req.method === "POST") {
+    const db = readDb();
+    const sessionId = currentSessionId(req);
+    if (sessionId) delete db.sessions[sessionId];
+    writeDb(db);
     clearSessionCookie(res);
     return json(res, 200, { ok: true });
   }
   if (!isAuthed(req)) return json(res, 401, { error: "请先登录" });
   if (url.pathname === "/api/sources") return json(res, 200, { sources: DATA_SOURCES });
   if (url.pathname === "/api/stocks") return json(res, 200, { stocks: STOCKS });
-  if (url.pathname === "/api/state") return json(res, 200, readState());
+  if (url.pathname === "/api/state") return json(res, 200, readState(req));
   if (url.pathname === "/api/history") {
     const symbol = url.searchParams.get("symbol") || "510300.SH";
     const range = url.searchParams.get("range") || "1mo";
@@ -583,29 +733,31 @@ async function handleApi(req, res, url) {
   }
   if (url.pathname === "/api/quotes") {
     const symbols = (url.searchParams.get("symbols") || "").split(",").filter(Boolean);
-    const quotes = await getQuotes(symbols.length ? symbols : readState().watchlist);
+    const quotes = await getQuotes(symbols.length ? symbols : readState(req).watchlist);
     return json(res, 200, { quotes, status: { A: marketStatus("A"), US: marketStatus("US") } });
   }
   if (url.pathname === "/api/order" && req.method === "POST") {
     try {
-      const result = await placeOrder(await readBody(req));
+      const state = readState(req);
+      const result = await placeOrder(await readBody(req), state);
+      if (result.status === 200) writeState(req, result.body.state);
       return json(res, result.status, result.body);
     } catch (error) {
       return json(res, 500, { error: error.message });
     }
   }
   if (url.pathname === "/api/watchlist" && req.method === "POST") {
-    const state = readState();
+    const state = readState(req);
     const body = await readBody(req);
     const symbol = String(body.symbol || "").trim().toUpperCase();
     if (!stockMap.has(symbol)) return json(res, 400, { error: "暂不支持这个代码" });
     if (body.action === "remove") state.watchlist = state.watchlist.filter((item) => item !== symbol);
     else if (!state.watchlist.includes(symbol)) state.watchlist.push(symbol);
-    writeState(state);
+    writeState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/journal" && req.method === "POST") {
-    const state = readState();
+    const state = readState(req);
     const body = await readBody(req);
     state.journal.unshift({
       id: crypto.randomUUID(),
@@ -614,11 +766,11 @@ async function handleApi(req, res, url) {
       title: String(body.title || "复盘记录").slice(0, 40),
       content: String(body.content || "").slice(0, 800)
     });
-    writeState(state);
+    writeState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/deposit" && req.method === "POST") {
-    const state = readState();
+    const state = readState(req);
     const body = await readBody(req);
     const currency = body.currency === "USD" ? "USD" : "CNY";
     const amount = Number(body.amount);
@@ -626,6 +778,14 @@ async function handleApi(req, res, url) {
       return json(res, 400, { error: "入金金额不正确" });
     }
     state.cash[currency] = Number((state.cash[currency] + amount).toFixed(2));
+    state.cashflows.unshift({
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      currency,
+      type: "deposit",
+      amount: Number(amount.toFixed(2)),
+      memo: `${currency === "CNY" ? "人民币" : "美元"}模拟入金`
+    });
     state.journal.unshift({
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -633,11 +793,11 @@ async function handleApi(req, res, url) {
       title: `${currency === "CNY" ? "人民币" : "美元"}模拟入金`,
       content: `模拟入金 ${currency === "CNY" ? "¥" : "$"}${amount.toFixed(2)}。`
     });
-    writeState(state);
+    writeState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/settings" && req.method === "POST") {
-    const state = readState();
+    const state = readState(req);
     const body = await readBody(req);
     for (const key of Object.keys(state.settings)) {
       if (body[key] !== undefined) {
@@ -645,15 +805,27 @@ async function handleApi(req, res, url) {
         if (Number.isFinite(value) && value >= 0) state.settings[key] = value;
       }
     }
-    writeState(state);
+    writeState(req, state);
+    return json(res, 200, state);
+  }
+  if (url.pathname === "/api/cancel-order" && req.method === "POST") {
+    const state = readState(req);
+    const body = await readBody(req);
+    const order = state.orders.find((item) => item.id === body.id && item.status === "pending");
+    if (!order) return json(res, 404, { error: "没有找到可撤销的委托" });
+    order.status = "cancelled";
+    order.cancelledAt = new Date().toISOString();
+    writeState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/rollover" && req.method === "POST") {
-    return json(res, 200, resetNextTradingDay(readState()));
+    const state = resetNextTradingDay(readState(req));
+    writeState(req, state);
+    return json(res, 200, state);
   }
   if (url.pathname === "/api/reset" && req.method === "POST") {
     const state = defaultState();
-    writeState(state);
+    writeState(req, state);
     return json(res, 200, state);
   }
   return json(res, 404, { error: "Not found" });
