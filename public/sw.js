@@ -1,4 +1,4 @@
-const CACHE = "stock-practice-lab-v5";
+const CACHE = "stock-practice-lab-v6";
 const ASSETS = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
