@@ -11,10 +11,13 @@
     <section id="loginOverlay" class="login-overlay" hidden>
       <form id="loginForm" class="login-box">
         <p class="eyebrow">Private Practice</p>
-        <h2>登录模拟账户</h2>
-        <p>这是你的云端模拟炒股训练场，输入部署时设置的访问密码。</p>
-        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="访问密码" />
+        <h2 id="loginTitle">登录模拟账户</h2>
+        <p id="loginHelp">输入用户名和密码，进入你的独立模拟账户。</p>
+        <input id="usernameInput" autocomplete="username" placeholder="用户名" />
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" />
+        <input id="inviteInput" type="password" placeholder="注册邀请码" hidden />
         <button class="primary" type="submit">进入</button>
+        <button id="authModeBtn" class="secondary" type="button">注册新账户</button>
         <p id="loginMessage" class="message"></p>
       </form>
     </section>
@@ -26,6 +29,7 @@
       </div>
       <div class="market-pills">
         <button id="logoutBtn" class="pill button-pill" hidden>退出</button>
+        <span id="userPill" class="pill" hidden>未登录</span>
         <span id="statusA" class="pill">A股</span>
         <span id="statusUS" class="pill">美股</span>
       </div>
@@ -68,7 +72,11 @@
               <h2>自选行情</h2>
               <p id="dataSource">正在读取行情...</p>
             </div>
-            <button id="refreshBtn" class="icon-btn" title="刷新行情">↻</button>
+            <div class="actions">
+              <select id="watchSymbol"></select>
+              <button id="addWatchBtn" class="secondary">加入自选</button>
+              <button id="refreshBtn" class="icon-btn" title="刷新行情">↻</button>
+            </div>
           </div>
           <div id="quoteList" class="quote-list"></div>
         </section>
@@ -159,6 +167,8 @@
           <div id="positionList" class="table-like"></div>
           <h3>最近订单</h3>
           <div id="orderList" class="history"></div>
+          <h3>资金流水</h3>
+          <div id="cashflowList" class="history"></div>
         </section>
 
         <section id="account" class="panel">
