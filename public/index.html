@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>模拟炒股训练场</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section id="loginOverlay" class="login-overlay" hidden>
+      <form id="loginForm" class="login-box">
+        <p class="eyebrow">Private Practice</p>
+        <h2>登录模拟账户</h2>
+        <p>这是你的云端模拟炒股训练场，输入部署时设置的访问密码。</p>
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="访问密码" />
+        <button class="primary" type="submit">进入</button>
+        <p id="loginMessage" class="message"></p>
+      </form>
+    </section>
+
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Paper Trading Lab</p>
+        <h1>模拟炒股训练场</h1>
+      </div>
+      <div class="market-pills">
+        <button id="logoutBtn" class="pill button-pill" hidden>退出</button>
+        <span id="statusA" class="pill">A股</span>
+        <span id="statusUS" class="pill">美股</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="summary-grid" aria-label="账户概览">
+        <article class="metric">
+          <span>总资产估算</span>
+          <strong id="totalAsset">--</strong>
+        </article>
+        <article class="metric">
+          <span>人民币现金</span>
+          <strong id="cashCny">--</strong>
+        </article>
+        <article class="metric">
+          <span>美元现金</span>
+          <strong id="cashUsd">--</strong>
+        </article>
+        <article class="metric">
+          <span>持仓盈亏</span>
+          <strong id="totalPnl">--</strong>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <nav class="tabs" aria-label="页面切换">
+          <button class="tab active" data-tab="watch">自选</button>
+          <button class="tab" data-tab="trade">交易</button>
+          <button class="tab" data-tab="positions">持仓</button>
+          <button class="tab" data-tab="journal">复盘</button>
+        </nav>
+
+        <section id="watch" class="panel active">
+          <div class="panel-head">
+            <div>
+              <h2>自选行情</h2>
+              <p id="dataSource">正在读取行情...</p>
+            </div>
+            <button id="refreshBtn" class="icon-btn" title="刷新行情">↻</button>
+          </div>
+          <div id="quoteList" class="quote-list"></div>
+        </section>
+
+        <section id="trade" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>模拟下单</h2>
+              <p>A股按 100 股一手并模拟 T+1，美股按 1 股交易。</p>
+            </div>
+          </div>
+          <form id="orderForm" class="order-form">
+            <label>
+              股票
+              <select id="symbolInput"></select>
+            </label>
+            <label>
+              方向
+              <select id="sideInput">
+                <option value="buy">买入</option>
+                <option value="sell">卖出</option>
+              </select>
+            </label>
+            <label>
+              类型
+              <select id="typeInput">
+                <option value="market">市价</option>
+                <option value="limit">限价</option>
+              </select>
+            </label>
+            <label>
+              限价
+              <input id="limitInput" type="number" step="0.001" placeholder="市价可留空" />
+            </label>
+            <label>
+              数量
+              <input id="quantityInput" type="number" min="1" value="100" />
+            </label>
+            <label class="wide">
+              下单理由
+              <textarea id="reasonInput" rows="3" placeholder="例如：观察沪深300ETF回到20日均线附近，先用小仓位练习限价买入。"></textarea>
+            </label>
+            <button class="primary wide" type="submit">提交模拟订单</button>
+          </form>
+          <p id="orderMessage" class="message"></p>
+        </section>
+
+        <section id="positions" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>持仓</h2>
+              <p>浮盈亏会随行情刷新变化。</p>
+            </div>
+            <div class="actions">
+              <button id="rolloverBtn" class="secondary">模拟到下一交易日</button>
+              <button id="resetBtn" class="secondary danger">重置账户</button>
+            </div>
+          </div>
+          <div id="positionList" class="table-like"></div>
+          <h3>最近订单</h3>
+          <div id="orderList" class="history"></div>
+        </section>
+
+        <section id="journal" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>复盘</h2>
+              <p>每一笔交易都留下理由，后面才能看见自己的模式。</p>
+            </div>
+          </div>
+          <form id="journalForm" class="journal-form">
+            <input id="journalTitle" placeholder="标题，例如：今天为什么想追高" />
+            <textarea id="journalContent" rows="4" placeholder="写下观察、情绪、计划和结果。"></textarea>
+            <button class="primary" type="submit">保存复盘</button>
+          </form>
+          <div id="journalList" class="history"></div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      这是学习用模拟环境，不构成投资建议。免费行情可能延迟或不可用，系统会自动切换到仿真行情。
+    </footer>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

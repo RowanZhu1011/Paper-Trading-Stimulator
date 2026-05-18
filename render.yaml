@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: stock-practice-lab
+    env: node
+    plan: free
+    buildCommand: ""
+    startCommand: "node server.js"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: APP_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+    disk:
+      name: stock-practice-data
+      mountPath: /var/data
+      sizeGB: 1

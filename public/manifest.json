@@ -1,0 +1,15 @@
+{
+  "name": "模拟炒股训练场",
+  "short_name": "模拟炒股",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f5ef",
+  "theme_color": "#1c5d54",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
