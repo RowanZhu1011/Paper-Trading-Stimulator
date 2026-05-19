@@ -3,14 +3,14 @@ services:
     name: stock-practice-lab
     env: node
     plan: free
-    buildCommand: ""
+    buildCommand: "npm install"
     startCommand: "node server.js"
     envVars:
       - key: NODE_ENV
         value: production
       - key: DATA_DIR
         value: /tmp/stock-practice-data
-      - key: APP_PASSWORD
+      - key: DATABASE_URL
         sync: false
       - key: SESSION_SECRET
         generateValue: true
