@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>模拟炒股训练场</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="stylesheet" href="/styles.css?v=13" />
+    <link rel="stylesheet" href="/styles.css?v=14" />
   </head>
   <body data-tab="watch">
     <section id="loginOverlay" class="login-overlay" hidden>
@@ -94,6 +94,8 @@
             </div>
           </div>
           <div id="stockTree" class="stock-tree"></div>
+          <div id="selectedStockPanel" class="selected-stock-panel"></div>
+          <h3>我的关注</h3>
           <div id="quoteList" class="quote-list"></div>
         </section>
 
@@ -320,7 +322,8 @@
       </section>
     </main>
 
-    <aside class="hover-drawer">
+    <button id="drawerToggle" class="drawer-toggle" type="button">账户</button>
+    <aside id="accountDrawer" class="hover-drawer">
       <strong id="drawerUser">游客模式</strong>
       <div class="drawer-status">
         <span id="drawerStatusA">A股</span>
@@ -346,6 +349,6 @@
       免责声明：这是学习用模拟环境，不构成投资建议。用户协议：仅供学习使用。隐私政策：游客数据仅保存在当前浏览器，登录账户数据会保存到云端数据库以支持多设备同步。
     </footer>
 
-    <script src="/app.js?v=13"></script>
+    <script src="/app.js?v=14"></script>
   </body>
 </html>
