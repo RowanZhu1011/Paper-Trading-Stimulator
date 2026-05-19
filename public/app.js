@@ -51,8 +51,7 @@ function defaultState() {
     positions: {},
     orders: [],
     cashflows: [],
-    journal: [],
-    tasks: { registered: false, watch: false, order: false, journal: false },
+    tasks: { registered: false, watch: false, order: false, records: false },
     watchlist: ["510300.SH", "159915.SZ", "600519.SH", "AAPL", "MSFT", "NVDA", "SPY"],
     createdAt: new Date().toISOString()
   };
@@ -67,7 +66,6 @@ function normalizeState(next) {
   merged.positions = merged.positions || {};
   merged.orders = merged.orders || [];
   merged.cashflows = merged.cashflows || [];
-  merged.journal = merged.journal || [];
   merged.tasks = { ...base.tasks, ...(merged.tasks || {}) };
   merged.watchlist = merged.watchlist && merged.watchlist.length ? merged.watchlist : base.watchlist;
   return merged;
@@ -128,7 +126,8 @@ function updateAuthUI() {
   $("#userPill").textContent = currentUser ? currentUser.username : "游客模式";
   $("#drawerUser").textContent = currentUser ? currentUser.username : "游客模式";
   $("#drawerLogout").hidden = !currentUser;
-  $("#drawerPassword").textContent = currentUser ? "修改密码" : "注册/登录";
+  const passwordAction = document.querySelector('[data-drawer-action="password"]');
+  if (passwordAction) passwordAction.textContent = currentUser ? "修改密码" : "注册/登录";
 }
 
 async function registerOrLogin(event) {
@@ -214,6 +213,10 @@ function setMarketStatus(status) {
   $("#statusUS").textContent = status.US.label;
   $("#statusA").classList.toggle("open", status.A.open);
   $("#statusUS").classList.toggle("open", status.US.open);
+  $("#drawerStatusA").textContent = status.A.label;
+  $("#drawerStatusUS").textContent = status.US.label;
+  $("#drawerStatusA").classList.toggle("open", status.A.open);
+  $("#drawerStatusUS").classList.toggle("open", status.US.open);
 }
 
 function marketTimeText() {
@@ -313,15 +316,21 @@ function renderStockTree(keyword = "") {
   const target = $("#stockTree");
   if (!target || !stocks.length) return;
   const normalized = keyword.trim().toLowerCase();
+  const compact = window.matchMedia("(max-width: 820px)").matches;
   const tree = groupedStocks();
-  target.innerHTML = Object.entries(tree).map(([market, sectors]) => `
+  target.innerHTML = `
+    <div class="stock-tree-head">
+      <strong>股票池</strong>
+      <span>按市场和行业展开，点股票会加入自选并同步到图表/交易。</span>
+    </div>
+    ${Object.entries(tree).map(([market, sectors]) => `
     <details class="tree-market" open>
       <summary>${market}</summary>
       ${Object.entries(sectors).map(([sector, items]) => {
         const filtered = items.filter((stock) => !normalized || `${stock.name}${stock.symbol}${stock.sector}`.toLowerCase().includes(normalized));
         if (!filtered.length) return "";
         return `
-          <details class="tree-sector" open>
+          <details class="tree-sector" ${compact ? "" : "open"}>
             <summary>${sector} <span>${filtered.length}</span></summary>
             <div class="tree-stocks">
               ${filtered.map((stock) => `<button class="${selectedStockTreeSymbol === stock.symbol ? "active" : ""}" data-tree-stock="${stock.symbol}">
@@ -332,7 +341,7 @@ function renderStockTree(keyword = "") {
         `;
       }).join("")}
     </details>
-  `).join("");
+  `).join("")}`;
   document.querySelectorAll("[data-tree-stock]").forEach((button) => button.addEventListener("click", async () => {
     selectedStockTreeSymbol = button.dataset.treeStock;
     $("#watchSymbol").value = selectedStockTreeSymbol;
@@ -477,10 +486,6 @@ function renderPositions() {
 }
 
 function renderOrders() {
-  const orderSelect = $("#journalOrder");
-  if (orderSelect) {
-    orderSelect.innerHTML = `<option value="">不关联订单</option>` + state.orders.slice(0, 20).map((order) => `<option value="${order.id}">${order.name} · ${order.side === "buy" ? "买入" : "卖出"} · ${order.statusLabel || order.status}</option>`).join("");
-  }
   $("#orderList").innerHTML = state.orders.length ? state.orders.map((order) => `
     <article class="history-item">
       <div><div class="name">${order.side === "buy" ? "买入" : "卖出"} ${order.name}</div><div class="sub">${new Date(order.createdAt).toLocaleString("zh-CN")}</div></div>
@@ -522,30 +527,40 @@ function renderCashflows(filter = "all") {
   `).join("") : `<p class="empty">暂无资金流水。</p>`;
 }
 
-function renderJournal() {
-  const tag = $("#journalFilter") ? $("#journalFilter").value : "all";
-  const items = state.journal.filter((item) => tag === "all" || item.tag === tag);
-  $("#journalList").innerHTML = items.length ? items.map((item) => `
-    <article class="history-item">
-      <div><div class="name">${item.title}</div><div class="sub">${item.symbol || "NOTE"} · ${item.tag || "未标记"} · ${new Date(item.createdAt).toLocaleString("zh-CN")}</div></div>
-      <div>${item.content}</div>
-      <div class="sub"><button class="secondary" data-edit-journal="${item.id}">修改</button> <button class="secondary danger" data-delete-journal="${item.id}">删除</button></div>
-    </article>
-  `).join("") : `<p class="empty">还没有复盘。第一条可以写“我为什么想买这只股票”。</p>`;
-  document.querySelectorAll("[data-delete-journal]").forEach((button) => button.addEventListener("click", () => {
-    state.journal = state.journal.filter((item) => item.id !== button.dataset.deleteJournal);
-    persistState();
-    renderJournal();
+function renderRecords() {
+  const filter = $("#recordFilter") ? $("#recordFilter").value : "all";
+  const orderRows = (state.orders || []).map((order) => ({
+    kind: "order",
+    time: order.createdAt,
+    html: `
+      <article class="history-item">
+        <div><div class="name">${order.side === "buy" ? "买入" : "卖出"} ${order.name}</div><div class="sub">${new Date(order.createdAt).toLocaleString("zh-CN")}</div></div>
+        <div>${order.quantity} 股 · ${money(order.price, order.currency)} · ${order.statusLabel || order.status || "已成交"} · 费用 ${money(order.fee, order.currency)}</div>
+        <div class="sub">${order.reason || "未填写理由"} <button class="secondary" data-record-chart="${order.symbol}">看图</button></div>
+      </article>
+    `
   }));
-  document.querySelectorAll("[data-edit-journal]").forEach((button) => button.addEventListener("click", () => {
-    const item = state.journal.find((entry) => entry.id === button.dataset.editJournal);
-    if (!item) return;
-    $("#journalTitle").value = item.title;
-    $("#journalContent").value = item.content;
-    $("#journalTag").value = item.tag || "观察";
-    state.journal = state.journal.filter((entry) => entry.id !== item.id);
-    persistState();
-    renderJournal();
+  const cashRows = (state.cashflows || []).map((flow) => ({
+    kind: "cash",
+    time: flow.createdAt,
+    html: `
+      <article class="history-item">
+        <div><div class="name">${flow.type === "deposit" ? "入金" : flow.type === "buy" ? "买入支出" : flow.type === "sell" ? "卖出收入" : "资金变动"}</div><div class="sub">${new Date(flow.createdAt).toLocaleString("zh-CN")}</div></div>
+        <div class="${flow.amount >= 0 ? "gain" : "loss"}">${money(flow.amount, flow.currency)}</div>
+        <div class="sub">${flow.memo || ""}</div>
+      </article>
+    `
+  }));
+  const rows = [...orderRows, ...cashRows]
+    .filter((row) => filter === "all" || row.kind === filter)
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
+  const target = $("#recordList");
+  if (!target) return;
+  target.innerHTML = rows.length ? rows.map((row) => row.html).join("") : `<p class="empty">还没有操作记录。完成一次入金、加自选或模拟下单后，这里会自动生成时间线。</p>`;
+  document.querySelectorAll("[data-record-chart]").forEach((button) => button.addEventListener("click", async () => {
+    $("#chartSymbol").value = button.dataset.recordChart;
+    activateTab("chart");
+    await loadChart();
   }));
 }
 
@@ -554,7 +569,7 @@ function renderTasks() {
     ["registered", "完成注册", currentUser ? "已完成" : "游客中"],
     ["watch", "添加自选", state.tasks.watch ? "已完成" : "待完成"],
     ["order", "完成下单", state.tasks.order ? "已完成" : "待完成"],
-    ["journal", "写一篇复盘", state.tasks.journal ? "已完成" : "待完成"]
+    ["records", "查看操作记录", state.orders.length || state.cashflows.length ? "已完成" : "待完成"]
   ];
   const target = $("#taskList");
   if (!target) return;
@@ -598,7 +613,7 @@ function renderAll() {
   renderPositions();
   renderAccount();
   renderSources();
-  renderJournal();
+  renderRecords();
   renderTasks();
   updateOrderPreview();
 }
@@ -635,6 +650,7 @@ async function refreshQuotes() {
 }
 
 function activateTab(tabName) {
+  document.body.dataset.tab = tabName;
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
   document.querySelectorAll("[data-mobile-tab]").forEach((tab) => tab.classList.toggle("active", tab.dataset.mobileTab === tabName));
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabName));
@@ -843,22 +859,6 @@ function showMessage(selector, text) {
   if (node) node.textContent = text;
 }
 
-function saveJournal(event) {
-  event.preventDefault();
-  const title = $("#journalTitle").value.trim();
-  const content = $("#journalContent").value.trim();
-  if (!title || !content) {
-    showMessage("#orderMessage", "复盘标题和内容都必填。");
-    return;
-  }
-  state.journal.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), title, content, tag: $("#journalTag").value, orderId: $("#journalOrder").value || "", symbol: $("#journalOrder").value || "NOTE" });
-  rewardTask("journal", 500, 50);
-  persistState();
-  $("#journalTitle").value = "";
-  $("#journalContent").value = "";
-  renderAll();
-}
-
 async function deposit(event) {
   event.preventDefault();
   const currency = $("#depositCurrency").value;
@@ -884,7 +884,7 @@ async function deposit(event) {
 }
 
 async function resetAccount() {
-  if (!confirm("确定重置账户吗？这会清空持仓、订单、复盘和资金流水。")) return;
+  if (!confirm("确定重置账户吗？这会清空持仓、订单、操作记录和资金流水。")) return;
   if (currentUser) {
     state = normalizeState(await api("/api/reset", { method: "POST" }));
   } else {
@@ -897,6 +897,21 @@ async function resetAccount() {
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
 document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.mobileTab)));
 document.querySelectorAll("[data-drawer-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.drawerTab)));
+document.querySelectorAll("[data-drawer-action]").forEach((button) => button.addEventListener("click", () => {
+  const action = button.dataset.drawerAction;
+  if (action === "account") {
+    if (currentUser) activateTab("account");
+    else {
+      setAuthMode("login");
+      showLogin();
+    }
+  }
+  if (action === "password") {
+    setAuthMode(currentUser ? "login" : "register");
+    showLogin();
+    $("#loginMessage").textContent = currentUser ? "在用户名框填当前账号，在密码框填新密码，然后点“忘记密码”。" : "";
+  }
+}));
 $("#loginEntryBtn").addEventListener("click", () => {
   setAuthMode("login");
   showLogin();
@@ -904,18 +919,6 @@ $("#loginEntryBtn").addEventListener("click", () => {
 $("#userPill").addEventListener("click", () => {
   if (currentUser) activateTab("account");
   else showLogin();
-});
-$("#drawerLogin").addEventListener("click", () => {
-  if (currentUser) activateTab("account");
-  else {
-    setAuthMode("login");
-    showLogin();
-  }
-});
-$("#drawerPassword").addEventListener("click", () => {
-  setAuthMode(currentUser ? "login" : "register");
-  showLogin();
-  $("#loginMessage").textContent = currentUser ? "在用户名框填当前账号，在密码框填新密码，然后点“忘记密码”。" : "";
 });
 $("#drawerLogout").addEventListener("click", () => {
   guestMode();
@@ -976,8 +979,7 @@ $("#rolloverBtn").addEventListener("click", async () => {
   }
   renderAll();
 });
-$("#journalForm").addEventListener("submit", saveJournal);
-$("#journalFilter").addEventListener("change", renderJournal);
+$("#recordFilter").addEventListener("change", renderRecords);
 $("#cashflowFilter").addEventListener("change", () => renderCashflows($("#cashflowFilter").value));
 window.addEventListener("resize", () => {
   if (candles.length) drawKline();
