@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>模拟炒股训练场</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="stylesheet" href="/styles.css?v=7" />
+    <link rel="stylesheet" href="/styles.css?v=8" />
   </head>
   <body>
     <section id="loginOverlay" class="login-overlay" hidden>
@@ -15,13 +15,18 @@
         <p id="loginHelp">输入用户名和密码，进入你的独立模拟账户。</p>
         <input id="usernameInput" autocomplete="username" placeholder="用户名" />
         <input id="passwordInput" type="password" autocomplete="current-password" placeholder="密码" />
-        <input id="inviteInput" type="password" placeholder="注册邀请码" hidden />
+        <label id="agreeWrap" class="checkline" hidden>
+          <input id="agreeInput" type="checkbox" />
+          我已阅读并同意用户协议、隐私政策和模拟交易风险提示
+        </label>
         <button class="primary" type="submit">进入</button>
         <button id="authModeBtn" class="secondary" type="button">注册新账户</button>
+        <button id="guestBtn" class="secondary" type="button">游客模式浏览</button>
         <p id="loginMessage" class="message"></p>
       </form>
     </section>
 
+    <div class="risk-bar">模拟交易仅用于学习，不构成投资建议；免费行情可能延迟或失败，交易规则为近似模拟。</div>
     <header class="topbar">
       <div>
         <p class="eyebrow">Paper Trading Lab</p>
@@ -73,7 +78,13 @@
               <p id="dataSource">正在读取行情...</p>
             </div>
             <div class="actions">
+              <input id="stockSearch" placeholder="搜索名称/代码" />
               <select id="watchSymbol"></select>
+              <select id="quoteSort">
+                <option value="default">默认排序</option>
+                <option value="gain">涨幅优先</option>
+                <option value="loss">跌幅优先</option>
+              </select>
               <button id="addWatchBtn" class="secondary">加入自选</button>
               <button id="refreshBtn" class="icon-btn" title="刷新行情">↻</button>
             </div>
@@ -102,6 +113,7 @@
               <canvas id="klineCanvas" width="960" height="420"></canvas>
             </div>
             <aside class="insight-panel">
+              <div id="chartStats" class="mini-stats"></div>
               <h3>怎么看</h3>
               <p><strong>红色</strong>表示收盘价高于开盘价，<strong>绿色</strong>表示收盘价低于开盘价。</p>
               <p>柱子越长，说明这段时间波动越大；上下细线代表最高价和最低价。</p>
@@ -117,6 +129,7 @@
               <p>A股按 100 股一手并模拟 T+1，美股按 1 股交易。</p>
             </div>
           </div>
+          <p id="orderPreview" class="message"></p>
           <form id="orderForm" class="order-form">
             <label>
               股票
@@ -168,6 +181,13 @@
           <h3>最近订单</h3>
           <div id="orderList" class="history"></div>
           <h3>资金流水</h3>
+          <select id="cashflowFilter">
+            <option value="all">全部流水</option>
+            <option value="deposit">入金</option>
+            <option value="buy">买入</option>
+            <option value="sell">卖出</option>
+            <option value="fee">费用</option>
+          </select>
           <div id="cashflowList" class="history"></div>
         </section>
 
@@ -239,18 +259,51 @@
           </div>
           <form id="journalForm" class="journal-form">
             <input id="journalTitle" placeholder="标题，例如：今天为什么想追高" />
+            <select id="journalTag">
+              <option value="观察">观察</option>
+              <option value="追涨">追涨</option>
+              <option value="抄底">抄底</option>
+              <option value="止损">止损</option>
+              <option value="纪律">纪律</option>
+            </select>
+            <select id="journalOrder">
+              <option value="">不关联订单</option>
+            </select>
             <textarea id="journalContent" rows="4" placeholder="写下观察、情绪、计划和结果。"></textarea>
             <button class="primary" type="submit">保存复盘</button>
           </form>
+          <select id="journalFilter">
+            <option value="all">全部标签</option>
+            <option value="观察">观察</option>
+            <option value="追涨">追涨</option>
+            <option value="抄底">抄底</option>
+            <option value="止损">止损</option>
+            <option value="纪律">纪律</option>
+          </select>
           <div id="journalList" class="history"></div>
         </section>
       </section>
     </main>
 
+    <aside class="hover-drawer">
+      <strong id="drawerUser">游客模式</strong>
+      <button class="secondary" data-drawer-tab="account">账户设置</button>
+      <button class="secondary" data-drawer-tab="journal">新手教程/复盘</button>
+      <button class="secondary" data-drawer-tab="sources">系统数据源</button>
+      <button class="secondary" id="drawerLogout">退出登录</button>
+    </aside>
+    <nav class="bottom-nav">
+      <button data-mobile-tab="watch">自选</button>
+      <button data-mobile-tab="chart">图表</button>
+      <button data-mobile-tab="trade">交易</button>
+      <button data-mobile-tab="positions">持仓</button>
+      <button data-mobile-tab="account">账户</button>
+      <button data-mobile-tab="journal">复盘</button>
+    </nav>
     <footer class="footer">
-      这是学习用模拟环境，不构成投资建议。免费行情可能延迟或不可用，系统会自动切换到仿真行情。
+      免责声明：这是学习用模拟环境，不构成投资建议。用户协议与隐私政策：本工具仅在本机 localStorage 保存模拟数据，登录用户数据不跨设备同步。
     </footer>
 
-    <script src="/app.js?v=7"></script>
+    <script src="/app.js?v=8"></script>
   </body>
 </html>
