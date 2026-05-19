@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>模拟炒股训练场</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="stylesheet" href="/styles.css?v=8" />
+    <link rel="stylesheet" href="/styles.css?v=10" />
   </head>
   <body>
     <section id="loginOverlay" class="login-overlay" hidden>
@@ -21,6 +21,7 @@
         </label>
         <button class="primary" type="submit">进入</button>
         <button id="authModeBtn" class="secondary" type="button">注册新账户</button>
+        <button id="forgotBtn" class="secondary" type="button">忘记密码</button>
         <button id="guestBtn" class="secondary" type="button">游客模式浏览</button>
         <p id="loginMessage" class="message"></p>
       </form>
@@ -210,6 +211,11 @@
               <p>美元资金，1 股起买，暂不模拟盘前盘后和融资融券。</p>
             </article>
           </div>
+          <div id="accountBreakdown" class="account-grid"></div>
+          <h3>新手任务</h3>
+          <div id="taskList" class="source-grid"></div>
+          <h3>收益排行榜</h3>
+          <div id="leaderboardList" class="history"></div>
           <form id="depositForm" class="order-form">
             <label>
               入金币种
@@ -290,6 +296,7 @@
       <button class="secondary" data-drawer-tab="account">账户设置</button>
       <button class="secondary" data-drawer-tab="journal">新手教程/复盘</button>
       <button class="secondary" data-drawer-tab="sources">系统数据源</button>
+      <button class="secondary" data-drawer-tab="account">排行榜</button>
       <button class="secondary" id="drawerLogout">退出登录</button>
     </aside>
     <nav class="bottom-nav">
@@ -301,9 +308,9 @@
       <button data-mobile-tab="journal">复盘</button>
     </nav>
     <footer class="footer">
-      免责声明：这是学习用模拟环境，不构成投资建议。用户协议与隐私政策：本工具仅在本机 localStorage 保存模拟数据，登录用户数据不跨设备同步。
+      免责声明：这是学习用模拟环境，不构成投资建议。用户协议：仅供学习使用。隐私政策：游客数据仅保存在当前浏览器，登录账户数据会保存到云端数据库以支持多设备同步。
     </footer>
 
-    <script src="/app.js?v=8"></script>
+    <script src="/app.js?v=10"></script>
   </body>
 </html>
