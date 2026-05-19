@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>模拟炒股训练场</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="stylesheet" href="/styles.css?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=11" />
   </head>
   <body>
     <section id="loginOverlay" class="login-overlay" hidden>
@@ -34,6 +34,7 @@
         <h1>模拟炒股训练场</h1>
       </div>
       <div class="market-pills">
+        <button id="loginEntryBtn" class="pill button-pill">登录/注册</button>
         <button id="logoutBtn" class="pill button-pill" hidden>退出</button>
         <span id="userPill" class="pill" hidden>未登录</span>
         <span id="statusA" class="pill">A股</span>
@@ -60,6 +61,7 @@
           <strong id="totalPnl">--</strong>
         </article>
       </section>
+      <section id="topAccountBreakdown" class="account-snapshot" aria-label="分账户资产"></section>
 
       <section class="workspace">
         <nav class="tabs" aria-label="页面切换">
@@ -90,6 +92,7 @@
               <button id="refreshBtn" class="icon-btn" title="刷新行情">↻</button>
             </div>
           </div>
+          <div id="stockTree" class="stock-tree"></div>
           <div id="quoteList" class="quote-list"></div>
         </section>
 
@@ -179,6 +182,8 @@
             </div>
           </div>
           <div id="positionList" class="table-like"></div>
+          <h3>A股 / 美股持仓分组</h3>
+          <div id="positionGroups" class="account-grid"></div>
           <h3>最近订单</h3>
           <div id="orderList" class="history"></div>
           <h3>资金流水</h3>
@@ -293,24 +298,25 @@
 
     <aside class="hover-drawer">
       <strong id="drawerUser">游客模式</strong>
-      <button class="secondary" data-drawer-tab="account">账户设置</button>
-      <button class="secondary" data-drawer-tab="journal">新手教程/复盘</button>
-      <button class="secondary" data-drawer-tab="sources">系统数据源</button>
-      <button class="secondary" data-drawer-tab="account">排行榜</button>
+      <button class="secondary" id="drawerLogin">账号信息 / 登录</button>
+      <button class="secondary" id="drawerPassword">修改密码</button>
+      <button class="secondary" data-drawer-tab="journal">新手教程 / 复盘</button>
+      <button class="secondary" data-drawer-tab="account">系统设置 / 账户</button>
+      <button class="secondary" data-drawer-tab="sources">数据源</button>
       <button class="secondary" id="drawerLogout">退出登录</button>
     </aside>
     <nav class="bottom-nav">
-      <button data-mobile-tab="watch">自选</button>
-      <button data-mobile-tab="chart">图表</button>
-      <button data-mobile-tab="trade">交易</button>
-      <button data-mobile-tab="positions">持仓</button>
-      <button data-mobile-tab="account">账户</button>
-      <button data-mobile-tab="journal">复盘</button>
+      <button class="active" data-mobile-tab="watch"><span>★</span>自选</button>
+      <button data-mobile-tab="chart"><span>▥</span>图表</button>
+      <button data-mobile-tab="trade"><span>↕</span>交易</button>
+      <button data-mobile-tab="positions"><span>▤</span>持仓</button>
+      <button data-mobile-tab="account"><span>◎</span>账户</button>
+      <button data-mobile-tab="journal"><span>✎</span>复盘</button>
     </nav>
     <footer class="footer">
       免责声明：这是学习用模拟环境，不构成投资建议。用户协议：仅供学习使用。隐私政策：游客数据仅保存在当前浏览器，登录账户数据会保存到云端数据库以支持多设备同步。
     </footer>
 
-    <script src="/app.js?v=10"></script>
+    <script src="/app.js?v=11"></script>
   </body>
 </html>
