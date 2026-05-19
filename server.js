@@ -4,14 +4,22 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 const { URL } = require("url");
+let Pool = null;
+try {
+  ({ Pool } = require("pg"));
+} catch {}
 
 const PORT = process.env.PORT || 4173;
 const HOST = process.env.HOST || "0.0.0.0";
-const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "state.json");
+const dbPool = DATABASE_URL && Pool ? new Pool({
+  connectionString: DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false
+}) : null;
 
 const STOCKS = [
   { symbol: "600519.SH", yahoo: "600519.SS", name: "贵州茅台", market: "A", currency: "CNY", lotSize: 100, base: 1540 },
@@ -61,11 +69,12 @@ function defaultState() {
       usMinCommission: 0.01,
       usdToCny: 7.2
     },
-    cash: { CNY: 100000, USD: 10000 },
+    cash: { CNY: 100000, USD: 15000 },
     positions: {},
     orders: [],
     cashflows: [],
     journal: [],
+    tasks: { registered: true, watch: false, order: false, journal: false },
     watchlist: ["510300.SH", "159915.SZ", "600519.SH", "AAPL", "MSFT", "NVDA", "SPY"],
     createdAt: new Date().toISOString()
   };
@@ -92,7 +101,7 @@ function readDb() {
   const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
   if (parsed.version === 2 && parsed.users) return parsed;
   const db = defaultDb();
-  const user = createUserRecord("demo", APP_PASSWORD || "demo123456", normalizeState(parsed));
+  const user = createUserRecord("demo", "demo123456", normalizeState(parsed));
   db.users[user.id] = user;
   writeDb(db);
   return db;
@@ -127,12 +136,13 @@ function normalizeState(state) {
   state.orders = state.orders || [];
   state.cashflows = state.cashflows || [];
   state.journal = state.journal || [];
+  state.tasks = { ...defaults.tasks, ...(state.tasks || {}) };
   state.watchlist = state.watchlist || defaults.watchlist;
   return state;
 }
 
 function normalizeUsername(username) {
-  return String(username || "").trim().toLowerCase().replace(/[^a-z0-9_\u4e00-\u9fa5.-]/g, "").slice(0, 24);
+  return String(username || "").trim().toLowerCase().replace(/[^a-z0-9_@\u4e00-\u9fa5.-]/g, "").slice(0, 80);
 }
 
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -231,6 +241,90 @@ function clearSessionCookie(res) {
     "spl_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
     "spl_user_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"
   ]);
+}
+
+async function initCloudDb() {
+  if (!dbPool) return;
+  await dbPool.query(`
+    create table if not exists users (
+      id uuid primary key,
+      username text unique not null,
+      salt text not null,
+      password_hash text not null,
+      state jsonb not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await dbPool.query(`
+    create table if not exists sessions (
+      id uuid primary key,
+      user_id uuid references users(id) on delete cascade,
+      created_at timestamptz not null default now()
+    )
+  `);
+}
+
+async function findCloudUserByUsername(username) {
+  if (!dbPool) return null;
+  await initCloudDb();
+  const result = await dbPool.query("select * from users where username=$1", [username]);
+  return result.rows[0] || null;
+}
+
+async function findCloudUserBySession(req) {
+  if (!dbPool) return null;
+  await initCloudDb();
+  const sessionId = currentSessionId(req);
+  if (!sessionId) return null;
+  const result = await dbPool.query(`
+    select users.* from sessions join users on users.id = sessions.user_id where sessions.id=$1
+  `, [sessionId]);
+  return result.rows[0] || null;
+}
+
+function rowToUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    salt: row.salt,
+    passwordHash: row.password_hash,
+    state: normalizeState(row.state),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+async function currentCloudUser(req) {
+  return rowToUser(await findCloudUserBySession(req));
+}
+
+async function createCloudUser(username, password) {
+  await initCloudDb();
+  const { salt, hash } = hashPassword(password);
+  const id = crypto.randomUUID();
+  const state = defaultState();
+  await dbPool.query(
+    "insert into users (id, username, salt, password_hash, state) values ($1,$2,$3,$4,$5)",
+    [id, username, salt, hash, state]
+  );
+  return { id, username, salt, passwordHash: hash, state };
+}
+
+async function saveCloudState(userId, state) {
+  await dbPool.query("update users set state=$1, updated_at=now() where id=$2", [normalizeState(state), userId]);
+}
+
+async function createCloudSession(userId) {
+  const sessionId = crypto.randomUUID();
+  await dbPool.query("insert into sessions (id, user_id) values ($1,$2)", [sessionId, userId]);
+  return sessionId;
+}
+
+async function deleteCloudSession(sessionId) {
+  if (!sessionId || !dbPool) return;
+  await dbPool.query("delete from sessions where id=$1", [sessionId]);
 }
 
 function readBody(req) {
@@ -604,18 +698,19 @@ async function placeOrder(body, state) {
     createdAt: now
   };
 
+  const market = marketStatus(stock.market);
   const isPendingLimit = body.orderType === "limit" && ((side === "buy" && price < quote.price) || (side === "sell" && price > quote.price));
-  if (isPendingLimit) {
+  if (!market.open || isPendingLimit) {
     const current = state.positions[stock.symbol];
     if (side === "sell" && (!current || current.quantity < quantity)) return { status: 400, body: { error: "持仓不足" } };
-    const order = { ...orderBase, status: "pending", fee: 0, amount: Number(amount.toFixed(2)) };
+    const order = { ...orderBase, status: "pending", statusLabel: !market.open ? "休市委托" : "已委托", fee: 0, amount: Number(amount.toFixed(2)) };
     state.orders.unshift(order);
     state.journal.unshift({
       id: crypto.randomUUID(),
       createdAt: now,
       symbol: stock.symbol,
       title: `提交限价委托 ${stock.name}`,
-      content: `${reason} 当前价 ${quote.price}，委托价 ${price}，暂未成交。`
+      content: `${reason} 当前价 ${quote.price}，委托价 ${price}，${market.open ? "暂未成交" : "当前休市，开盘后再模拟成交"}。`
     });
     return { status: 200, body: { order, state } };
   }
@@ -679,57 +774,169 @@ function resetNextTradingDay(state) {
   return state;
 }
 
+async function requestUser(req) {
+  if (dbPool) return currentCloudUser(req);
+  return currentUser(req);
+}
+
+async function requestState(req) {
+  const user = await requestUser(req);
+  return user ? normalizeState(user.state) : null;
+}
+
+async function saveRequestState(req, nextState) {
+  const state = normalizeState(nextState);
+  if (dbPool) {
+    const user = await currentCloudUser(req);
+    if (!user) return false;
+    await saveCloudState(user.id, state);
+    return true;
+  }
+  return writeState(req, state);
+}
+
+async function findFileUserByUsername(username) {
+  const db = readDb();
+  const entry = Object.values(db.users).find((item) => item.username === username);
+  return { db, entry };
+}
+
+async function updatePassword(username, password) {
+  const { salt, hash } = hashPassword(password);
+  if (dbPool) {
+    await initCloudDb();
+    const result = await dbPool.query(
+      "update users set salt=$1, password_hash=$2, updated_at=now() where username=$3 returning username",
+      [salt, hash, username]
+    );
+    return Boolean(result.rowCount);
+  }
+  const { db, entry } = await findFileUserByUsername(username);
+  if (!entry) return false;
+  entry.salt = salt;
+  entry.passwordHash = hash;
+  entry.updatedAt = new Date().toISOString();
+  writeDb(db);
+  return true;
+}
+
+function estimateStateTotal(state) {
+  const normalized = normalizeState(state);
+  const usdToCny = normalized.settings.usdToCny || 7.2;
+  let aValue = 0;
+  let usValue = 0;
+  for (const position of Object.values(normalized.positions || {})) {
+    const value = Number(position.avgCost || 0) * Number(position.quantity || 0);
+    if (position.currency === "USD") usValue += value;
+    else aValue += value;
+  }
+  const totalCny = normalized.cash.CNY + aValue + (normalized.cash.USD + usValue) * usdToCny;
+  const initialCny = 100000 + 15000 * usdToCny;
+  return {
+    totalCny: Number(totalCny.toFixed(2)),
+    returnPct: Number((((totalCny - initialCny) / initialCny) * 100).toFixed(2))
+  };
+}
+
+async function leaderboardRows() {
+  if (dbPool) {
+    await initCloudDb();
+    const result = await dbPool.query("select username, state from users order by updated_at desc limit 200");
+    return result.rows.map((row) => ({ username: row.username, ...estimateStateTotal(row.state) }))
+      .sort((a, b) => b.returnPct - a.returnPct)
+      .slice(0, 20);
+  }
+  const db = readDb();
+  return Object.values(db.users).map((user) => ({ username: user.username, ...estimateStateTotal(user.state) }))
+    .sort((a, b) => b.returnPct - a.returnPct)
+    .slice(0, 20);
+}
+
 async function handleApi(req, res, url) {
   if (url.pathname === "/api/auth/status") {
-    const db = readDb();
-    const userId = currentUserId(req, db);
+    const user = await requestUser(req);
+    const usersCount = dbPool
+      ? (await (async () => {
+        await initCloudDb();
+        const result = await dbPool.query("select count(*)::int as count from users");
+        return result.rows[0].count;
+      })())
+      : Object.keys(readDb().users).length;
     return json(res, 200, {
       required: true,
-      authed: Boolean(userId),
-      user: userId ? { username: db.users[userId].username } : null,
-      inviteRequired: Boolean(APP_PASSWORD),
-      usersCount: Object.keys(db.users).length
+      authed: Boolean(user),
+      user: user ? { username: user.username } : null,
+      inviteRequired: false,
+      storage: dbPool ? "postgres" : "file",
+      usersCount
     });
   }
   if (url.pathname === "/api/auth/login" && req.method === "POST") {
-    const db = readDb();
     const body = await readBody(req);
-    const username = normalizeUsername(body.username || "demo");
-    const user = Object.values(db.users).find((item) => item.username === username);
+    const username = normalizeUsername(body.username);
+    if (!username) return json(res, 400, { error: "请输入手机号/邮箱和密码" });
+    const user = dbPool
+      ? rowToUser(await findCloudUserByUsername(username))
+      : (await findFileUserByUsername(username)).entry;
     if (verifyPassword(body.password || "", user)) {
-      const sessionId = crypto.randomUUID();
-      db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
-      writeDb(db);
+      let sessionId = "";
+      if (dbPool) {
+        sessionId = await createCloudSession(user.id);
+      } else {
+        const db = readDb();
+        sessionId = crypto.randomUUID();
+        db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
+        writeDb(db);
+      }
       setUserSessionCookie(res, sessionId);
       return json(res, 200, { ok: true, user: { username: user.username } });
     }
     return json(res, 401, { error: "用户名或密码不正确" });
   }
   if (url.pathname === "/api/auth/register" && req.method === "POST") {
-    const db = readDb();
     const body = await readBody(req);
     const username = normalizeUsername(body.username);
-    const password = String(body.password || "");
-    const invite = String(body.invite || "");
+    const password = String(body.password || "").trim();
     if (!username || username.length < 2) return json(res, 400, { error: "用户名至少 2 个字符" });
     if (password.length < 6) return json(res, 400, { error: "密码至少 6 位" });
-    if (APP_PASSWORD && invite !== APP_PASSWORD) return json(res, 403, { error: "邀请码不正确" });
-    if (Object.values(db.users).some((item) => item.username === username)) {
+    const existing = dbPool ? await findCloudUserByUsername(username) : (await findFileUserByUsername(username)).entry;
+    if (existing) {
       return json(res, 400, { error: "这个用户名已经被注册" });
     }
-    const user = createUserRecord(username, password);
-    db.users[user.id] = user;
-    const sessionId = crypto.randomUUID();
-    db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
-    writeDb(db);
+    let user;
+    let sessionId = "";
+    if (dbPool) {
+      user = await createCloudUser(username, password);
+      sessionId = await createCloudSession(user.id);
+    } else {
+      const db = readDb();
+      user = createUserRecord(username, password);
+      db.users[user.id] = user;
+      sessionId = crypto.randomUUID();
+      db.sessions[sessionId] = { userId: user.id, createdAt: new Date().toISOString() };
+      writeDb(db);
+    }
     setUserSessionCookie(res, sessionId);
     return json(res, 200, { ok: true, user: { username } });
   }
+  if (url.pathname === "/api/auth/forgot" && req.method === "POST") {
+    const body = await readBody(req);
+    const username = normalizeUsername(body.username);
+    const password = String(body.password || "").trim();
+    if (!username || password.length < 6) return json(res, 400, { error: "请输入账号和至少 6 位新密码" });
+    const ok = await updatePassword(username, password);
+    if (!ok) return json(res, 404, { error: "没有找到这个账号" });
+    return json(res, 200, { ok: true });
+  }
   if (url.pathname === "/api/auth/logout" && req.method === "POST") {
-    const db = readDb();
     const sessionId = currentSessionId(req);
-    if (sessionId) delete db.sessions[sessionId];
-    writeDb(db);
+    if (dbPool) {
+      await deleteCloudSession(sessionId);
+    } else {
+      const db = readDb();
+      if (sessionId) delete db.sessions[sessionId];
+      writeDb(db);
+    }
     clearSessionCookie(res);
     return json(res, 200, { ok: true });
   }
@@ -765,43 +972,53 @@ async function handleApi(req, res, url) {
     const quotes = await getQuotes(symbols.length ? symbols : defaultState().watchlist);
     return json(res, 200, { quotes, status: { A: marketStatus("A"), US: marketStatus("US") } });
   }
-  if (!isAuthed(req)) return json(res, 401, { error: "请先登录" });
-  if (url.pathname === "/api/state") return json(res, 200, readState(req));
+  if (url.pathname === "/api/leaderboard") return json(res, 200, { rows: await leaderboardRows() });
+
+  const userState = await requestState(req);
+  if (!userState) return json(res, 401, { error: "请先登录" });
+  if (url.pathname === "/api/state") return json(res, 200, userState);
+  if (url.pathname === "/api/state/save" && req.method === "POST") {
+    const body = await readBody(req);
+    await saveRequestState(req, body.state || userState);
+    return json(res, 200, { ok: true });
+  }
   if (url.pathname === "/api/order" && req.method === "POST") {
     try {
-      const state = readState(req);
+      const state = userState;
       const result = await placeOrder(await readBody(req), state);
-      if (result.status === 200) writeState(req, result.body.state);
+      if (result.status === 200) await saveRequestState(req, result.body.state);
       return json(res, result.status, result.body);
     } catch (error) {
       return json(res, 500, { error: error.message });
     }
   }
   if (url.pathname === "/api/watchlist" && req.method === "POST") {
-    const state = readState(req);
+    const state = userState;
     const body = await readBody(req);
     const symbol = String(body.symbol || "").trim().toUpperCase();
     if (!stockMap.has(symbol)) return json(res, 400, { error: "暂不支持这个代码" });
     if (body.action === "remove") state.watchlist = state.watchlist.filter((item) => item !== symbol);
     else if (!state.watchlist.includes(symbol)) state.watchlist.push(symbol);
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/journal" && req.method === "POST") {
-    const state = readState(req);
+    const state = userState;
     const body = await readBody(req);
     state.journal.unshift({
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       symbol: body.symbol || "NOTE",
       title: String(body.title || "复盘记录").slice(0, 40),
-      content: String(body.content || "").slice(0, 800)
+      content: String(body.content || "").slice(0, 800),
+      tag: String(body.tag || "观察").slice(0, 12),
+      orderId: String(body.orderId || "")
     });
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/deposit" && req.method === "POST") {
-    const state = readState(req);
+    const state = userState;
     const body = await readBody(req);
     const currency = body.currency === "USD" ? "USD" : "CNY";
     const amount = Number(body.amount);
@@ -824,11 +1041,11 @@ async function handleApi(req, res, url) {
       title: `${currency === "CNY" ? "人民币" : "美元"}模拟入金`,
       content: `模拟入金 ${currency === "CNY" ? "¥" : "$"}${amount.toFixed(2)}。`
     });
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/settings" && req.method === "POST") {
-    const state = readState(req);
+    const state = userState;
     const body = await readBody(req);
     for (const key of Object.keys(state.settings)) {
       if (body[key] !== undefined) {
@@ -836,27 +1053,28 @@ async function handleApi(req, res, url) {
         if (Number.isFinite(value) && value >= 0) state.settings[key] = value;
       }
     }
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/cancel-order" && req.method === "POST") {
-    const state = readState(req);
+    const state = userState;
     const body = await readBody(req);
     const order = state.orders.find((item) => item.id === body.id && item.status === "pending");
     if (!order) return json(res, 404, { error: "没有找到可撤销的委托" });
     order.status = "cancelled";
+    order.statusLabel = "已撤单";
     order.cancelledAt = new Date().toISOString();
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/rollover" && req.method === "POST") {
-    const state = resetNextTradingDay(readState(req));
-    writeState(req, state);
+    const state = resetNextTradingDay(userState);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   if (url.pathname === "/api/reset" && req.method === "POST") {
     const state = defaultState();
-    writeState(req, state);
+    await saveRequestState(req, state);
     return json(res, 200, state);
   }
   return json(res, 404, { error: "Not found" });
@@ -890,7 +1108,10 @@ function serveStatic(req, res, url) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname.startsWith("/api/")) {
-    handleApi(req, res, url);
+    handleApi(req, res, url).catch((error) => {
+      console.error(error);
+      json(res, 500, { error: "服务器内部错误，请稍后重试" });
+    });
   } else {
     serveStatic(req, res, url);
   }
