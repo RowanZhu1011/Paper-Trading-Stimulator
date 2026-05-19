@@ -89,8 +89,7 @@ function defaultState() {
     positions: {},
     orders: [],
     cashflows: [],
-    journal: [],
-    tasks: { registered: true, watch: false, order: false, journal: false },
+    tasks: { registered: true, watch: false, order: false, records: false },
     watchlist: ["510300.SH", "159915.SZ", "600519.SH", "AAPL", "MSFT", "NVDA", "SPY"],
     createdAt: new Date().toISOString()
   };
@@ -151,7 +150,6 @@ function normalizeState(state) {
   state.positions = state.positions || {};
   state.orders = state.orders || [];
   state.cashflows = state.cashflows || [];
-  state.journal = state.journal || [];
   state.tasks = { ...defaults.tasks, ...(state.tasks || {}) };
   state.watchlist = state.watchlist || defaults.watchlist;
   return state;
@@ -721,13 +719,6 @@ async function placeOrder(body, state) {
     if (side === "sell" && (!current || current.quantity < quantity)) return { status: 400, body: { error: "持仓不足" } };
     const order = { ...orderBase, status: "pending", statusLabel: !market.open ? "休市委托" : "已委托", fee: 0, amount: Number(amount.toFixed(2)) };
     state.orders.unshift(order);
-    state.journal.unshift({
-      id: crypto.randomUUID(),
-      createdAt: now,
-      symbol: stock.symbol,
-      title: `提交限价委托 ${stock.name}`,
-      content: `${reason} 当前价 ${quote.price}，委托价 ${price}，${market.open ? "暂未成交" : "当前休市，开盘后再模拟成交"}。`
-    });
     return { status: 200, body: { order, state } };
   }
 
@@ -770,13 +761,6 @@ async function placeOrder(body, state) {
     type: side === "buy" ? "buy" : "sell",
     amount: Number((side === "buy" ? -(amount + fee) : amount - fee).toFixed(2)),
     memo: `${side === "buy" ? "买入" : "卖出"} ${stock.name} ${quantity} 股，费用 ${fee}`
-  });
-  state.journal.unshift({
-    id: crypto.randomUUID(),
-    createdAt: now,
-    symbol: stock.symbol,
-    title: `${side === "buy" ? "买入" : "卖出"} ${stock.name}`,
-    content: reason
   });
   return { status: 200, body: { order, state } };
 }
@@ -1018,21 +1002,6 @@ async function handleApi(req, res, url) {
     await saveRequestState(req, state);
     return json(res, 200, state);
   }
-  if (url.pathname === "/api/journal" && req.method === "POST") {
-    const state = userState;
-    const body = await readBody(req);
-    state.journal.unshift({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      symbol: body.symbol || "NOTE",
-      title: String(body.title || "复盘记录").slice(0, 40),
-      content: String(body.content || "").slice(0, 800),
-      tag: String(body.tag || "观察").slice(0, 12),
-      orderId: String(body.orderId || "")
-    });
-    await saveRequestState(req, state);
-    return json(res, 200, state);
-  }
   if (url.pathname === "/api/deposit" && req.method === "POST") {
     const state = userState;
     const body = await readBody(req);
@@ -1049,13 +1018,6 @@ async function handleApi(req, res, url) {
       type: "deposit",
       amount: Number(amount.toFixed(2)),
       memo: `${currency === "CNY" ? "人民币" : "美元"}模拟入金`
-    });
-    state.journal.unshift({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      symbol: "CASH",
-      title: `${currency === "CNY" ? "人民币" : "美元"}模拟入金`,
-      content: `模拟入金 ${currency === "CNY" ? "¥" : "$"}${amount.toFixed(2)}。`
     });
     await saveRequestState(req, state);
     return json(res, 200, state);
