@@ -733,10 +733,8 @@ async function handleApi(req, res, url) {
     clearSessionCookie(res);
     return json(res, 200, { ok: true });
   }
-  if (!isAuthed(req)) return json(res, 401, { error: "请先登录" });
   if (url.pathname === "/api/sources") return json(res, 200, { sources: DATA_SOURCES });
   if (url.pathname === "/api/stocks") return json(res, 200, { stocks: STOCKS });
-  if (url.pathname === "/api/state") return json(res, 200, readState(req));
   if (url.pathname === "/api/history") {
     const symbol = url.searchParams.get("symbol") || "510300.SH";
     const range = url.searchParams.get("range") || "1mo";
@@ -764,9 +762,11 @@ async function handleApi(req, res, url) {
   }
   if (url.pathname === "/api/quotes") {
     const symbols = (url.searchParams.get("symbols") || "").split(",").filter(Boolean);
-    const quotes = await getQuotes(symbols.length ? symbols : readState(req).watchlist);
+    const quotes = await getQuotes(symbols.length ? symbols : defaultState().watchlist);
     return json(res, 200, { quotes, status: { A: marketStatus("A"), US: marketStatus("US") } });
   }
+  if (!isAuthed(req)) return json(res, 401, { error: "请先登录" });
+  if (url.pathname === "/api/state") return json(res, 200, readState(req));
   if (url.pathname === "/api/order" && req.method === "POST") {
     try {
       const state = readState(req);
