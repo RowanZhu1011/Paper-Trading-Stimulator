@@ -9,6 +9,7 @@ let selectedChartQuote = null;
 let remoteSaveTimer = null;
 let leaderboardRows = [];
 let selectedStockTreeSymbol = "";
+let selectedStockQuote = null;
 
 const STORE_GUEST = "spl_guest_state_v1";
 
@@ -208,6 +209,13 @@ function stockBySymbol(symbol) {
   return stocks.find((stock) => stock.symbol === symbol);
 }
 
+async function quoteForSymbol(symbol) {
+  const existing = quoteBySymbol(symbol);
+  if (existing) return existing;
+  const payload = await api(`/api/quotes?symbols=${encodeURIComponent(symbol)}`);
+  return payload.quotes && payload.quotes[0] ? payload.quotes[0] : null;
+}
+
 function setMarketStatus(status) {
   $("#statusA").textContent = status.A.label;
   $("#statusUS").textContent = status.US.label;
@@ -321,7 +329,7 @@ function renderStockTree(keyword = "") {
   target.innerHTML = `
     <div class="stock-tree-head">
       <strong>股票池</strong>
-      <span>按市场和行业展开，点股票会加入自选并同步到图表/交易。</span>
+      <span>按市场和行业展开，点具体股票后可看图、交易或加入关注。</span>
     </div>
     ${Object.entries(tree).map(([market, sectors]) => `
     <details class="tree-market" open>
@@ -343,19 +351,71 @@ function renderStockTree(keyword = "") {
     </details>
   `).join("")}`;
   document.querySelectorAll("[data-tree-stock]").forEach((button) => button.addEventListener("click", async () => {
-    selectedStockTreeSymbol = button.dataset.treeStock;
-    $("#watchSymbol").value = selectedStockTreeSymbol;
-    $("#chartSymbol").value = selectedStockTreeSymbol;
-    $("#symbolInput").value = selectedStockTreeSymbol;
-    if (!state.watchlist.includes(selectedStockTreeSymbol)) {
-      state.watchlist.push(selectedStockTreeSymbol);
+    await selectStock(button.dataset.treeStock);
+  }));
+}
+
+async function selectStock(symbol) {
+  selectedStockTreeSymbol = symbol;
+  $("#watchSymbol").value = symbol;
+  $("#chartSymbol").value = symbol;
+  $("#symbolInput").value = symbol;
+  selectedStockQuote = await quoteForSymbol(symbol).catch(() => null);
+  renderStockTree($("#stockSearch").value);
+  renderSelectedStock();
+}
+
+function renderSelectedStock() {
+  const target = $("#selectedStockPanel");
+  if (!target) return;
+  const stock = stockBySymbol(selectedStockTreeSymbol);
+  if (!stock) {
+    target.innerHTML = `<p class="empty">从上方股票池点一只股票，这里会出现看图、交易、加入关注入口。</p>`;
+    return;
+  }
+  const quote = selectedStockQuote || quoteBySymbol(stock.symbol);
+  const watched = state.watchlist.includes(stock.symbol);
+  target.innerHTML = `
+    <article class="selected-stock-card">
+      <div>
+        <span>${stock.market === "A" ? "A股" : "美股"} · ${stock.sector || "股票"}</span>
+        <strong>${stock.name}</strong>
+        <em>${stock.symbol}</em>
+      </div>
+      <div>
+        <span>现价</span>
+        <strong>${quote ? money(quote.price, quote.currency) : "--"}</strong>
+        <em class="${quote && quote.change >= 0 ? "gain" : "loss"}">${quote ? `${quote.change >= 0 ? "+" : ""}${pct(quote.changePct)}` : "等待行情"}</em>
+      </div>
+      <div class="selected-actions">
+        <button class="secondary" data-selected-chart="${stock.symbol}">看K线</button>
+        <button class="primary" data-selected-trade="${stock.symbol}">去交易</button>
+        <button class="secondary" data-selected-watch="${stock.symbol}">${watched ? "已关注" : "加入关注"}</button>
+      </div>
+    </article>
+  `;
+  const chart = target.querySelector("[data-selected-chart]");
+  const trade = target.querySelector("[data-selected-trade]");
+  const watch = target.querySelector("[data-selected-watch]");
+  chart.addEventListener("click", async () => {
+    $("#chartSymbol").value = stock.symbol;
+    activateTab("chart");
+    await loadChart();
+  });
+  trade.addEventListener("click", () => {
+    $("#symbolInput").value = stock.symbol;
+    activateTab("trade");
+    updateOrderPreview();
+  });
+  watch.addEventListener("click", async () => {
+    if (!state.watchlist.includes(stock.symbol)) {
+      state.watchlist.push(stock.symbol);
       rewardTask("watch", 500, 50);
       persistState();
       await refreshQuotes();
-    } else {
-      renderStockTree($("#stockSearch").value);
     }
-  }));
+    renderSelectedStock();
+  });
 }
 
 function renderQuotes(sortMode = $("#quoteSort") ? $("#quoteSort").value : "default") {
@@ -366,16 +426,13 @@ function renderQuotes(sortMode = $("#quoteSort") ? $("#quoteSort").value : "defa
   $("#quoteList").innerHTML = sorted.length ? sorted.map((quote) => {
     const tone = quote.change >= 0 ? "gain" : "loss";
     return `
-      <article class="quote-row">
+      <article class="favorite-row">
         <div>
           <div class="name">${quote.name}</div>
           <div class="sub">${quote.symbol} · ${quote.market === "A" ? "A股" : "美股"} · ${quote.source}</div>
         </div>
         <div><div class="sub">现价</div><div class="price">${money(quote.price, quote.currency)}</div></div>
-        <div><div class="sub">涨跌</div><div class="${tone}">${quote.change >= 0 ? "+" : ""}${Number(quote.change || 0).toFixed(2)}</div></div>
         <div><div class="sub">涨跌幅</div><div class="${tone}">${quote.changePct >= 0 ? "+" : ""}${pct(quote.changePct)}</div></div>
-        <div><div class="sub">今开/高/低</div><div>${Number(quote.open || 0).toFixed(2)} / ${Number(quote.high || 0).toFixed(2)} / ${Number(quote.low || 0).toFixed(2)}</div></div>
-        <div><div class="sub">成交量</div><div>${Number(quote.volume || 0).toLocaleString("zh-CN")}</div></div>
         <div class="row-actions">
           <button class="secondary" data-chart="${quote.symbol}">图表</button>
           <button class="secondary" data-trade="${quote.symbol}">交易</button>
@@ -399,6 +456,7 @@ function renderQuotes(sortMode = $("#quoteSort") ? $("#quoteSort").value : "defa
     state.watchlist = state.watchlist.filter((symbol) => symbol !== button.dataset.removeWatch);
     persistState();
     await refreshQuotes();
+    renderSelectedStock();
   }));
 }
 
@@ -408,6 +466,8 @@ function renderStockOptions() {
   $("#chartSymbol").innerHTML = optionHtml;
   $("#watchSymbol").innerHTML = optionHtml;
   renderStockTree($("#stockSearch") ? $("#stockSearch").value : "");
+  if (!selectedStockTreeSymbol && stocks[0]) selectedStockTreeSymbol = stocks[0].symbol;
+  renderSelectedStock();
 }
 
 function renderAccount() {
@@ -896,7 +956,18 @@ async function resetAccount() {
 
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
 document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.mobileTab)));
-document.querySelectorAll("[data-drawer-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.drawerTab)));
+function closeDrawer() {
+  $("#accountDrawer").classList.remove("open");
+}
+
+$("#drawerToggle").addEventListener("click", () => {
+  $("#accountDrawer").classList.toggle("open");
+});
+
+document.querySelectorAll("[data-drawer-tab]").forEach((button) => button.addEventListener("click", () => {
+  activateTab(button.dataset.drawerTab);
+  closeDrawer();
+}));
 document.querySelectorAll("[data-drawer-action]").forEach((button) => button.addEventListener("click", () => {
   const action = button.dataset.drawerAction;
   if (action === "account") {
@@ -911,6 +982,7 @@ document.querySelectorAll("[data-drawer-action]").forEach((button) => button.add
     showLogin();
     $("#loginMessage").textContent = currentUser ? "在用户名框填当前账号，在密码框填新密码，然后点“忘记密码”。" : "";
   }
+  closeDrawer();
 }));
 $("#loginEntryBtn").addEventListener("click", () => {
   setAuthMode("login");
@@ -922,6 +994,7 @@ $("#userPill").addEventListener("click", () => {
 });
 $("#drawerLogout").addEventListener("click", () => {
   guestMode();
+  closeDrawer();
 });
 $("#loginForm").addEventListener("submit", registerOrLogin);
 $("#authModeBtn").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
@@ -938,6 +1011,9 @@ $("#addWatchBtn").addEventListener("click", async () => {
   rewardTask("watch", 500, 50);
   persistState();
   await refreshQuotes();
+  selectedStockTreeSymbol = symbol;
+  selectedStockQuote = quoteBySymbol(symbol);
+  renderSelectedStock();
 });
 $("#stockSearch").addEventListener("input", () => {
   const keyword = $("#stockSearch").value.trim().toLowerCase();
