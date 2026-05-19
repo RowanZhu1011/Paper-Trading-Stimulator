@@ -22,7 +22,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  padding-bottom: 0;
+  padding-bottom: 86px;
 }
 
 [hidden] {
@@ -94,6 +94,13 @@ h3 {
 
 .button-pill {
   cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.button-pill:hover {
+  transform: translateY(-1px);
+  border-color: var(--brand);
+  background: #ecfffb;
 }
 
 .pill.open {
@@ -150,6 +157,37 @@ h3 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 14px;
+}
+
+body:not([data-tab="account"]) .summary-grid,
+body:not([data-tab="account"]) .account-snapshot {
+  display: none;
+}
+
+.account-snapshot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.account-snapshot article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--white);
+  padding: 14px 16px;
+}
+
+.account-snapshot span,
+.account-snapshot small {
+  display: block;
+  color: var(--muted);
+}
+
+.account-snapshot strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 1.25rem;
 }
 
 .metric {
@@ -216,10 +254,27 @@ h3 {
   border-radius: 8px;
   padding: 18px;
   min-height: 560px;
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .panel.active {
   display: block;
+  opacity: 1;
+  transform: translateY(0);
+  animation: panelIn 0.18s ease;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .panel-head {
@@ -267,9 +322,95 @@ h3 {
   font-weight: 700;
 }
 
+.primary:hover,
+.secondary:hover,
+.icon-btn:hover {
+  border-color: var(--brand);
+  box-shadow: 0 4px 12px rgba(28, 93, 84, 0.12);
+  transform: translateY(-1px);
+}
+
 .quote-list {
   display: grid;
   gap: 8px;
+}
+
+.stock-tree {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.stock-tree-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f4fbf8;
+  padding: 10px 12px;
+}
+
+.stock-tree-head span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.tree-market,
+.tree-sector {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefa;
+  overflow: hidden;
+}
+
+.tree-market summary,
+.tree-sector summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 800;
+}
+
+.tree-sector {
+  margin: 8px 10px 10px;
+  background: var(--white);
+}
+
+.tree-sector summary {
+  display: flex;
+  justify-content: space-between;
+  color: var(--brand);
+}
+
+.tree-stocks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.tree-stocks button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefa;
+  padding: 9px 10px;
+  cursor: pointer;
+}
+
+.tree-stocks button.active,
+.tree-stocks button:hover {
+  border-color: var(--brand);
+  background: #ecfffb;
+}
+
+.tree-stocks em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .quote-row,
@@ -285,7 +426,7 @@ h3 {
 }
 
 .quote-row {
-  grid-template-columns: minmax(160px, 1.4fr) repeat(4, minmax(88px, 0.7fr)) 136px;
+  grid-template-columns: minmax(160px, 1.4fr) repeat(5, minmax(82px, 0.7fr)) 136px;
 }
 
 .name {
@@ -389,6 +530,13 @@ h3 {
   margin-bottom: 18px;
 }
 
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
 .source-card {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -460,12 +608,6 @@ textarea {
   grid-template-columns: minmax(130px, 0.8fr) minmax(160px, 1.5fr) minmax(140px, 1fr);
 }
 
-.journal-form {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -484,9 +626,9 @@ textarea {
 
 .hover-drawer {
   position: fixed;
-  left: -210px;
+  left: -232px;
   top: 96px;
-  width: 230px;
+  width: 252px;
   z-index: 18;
   display: grid;
   gap: 10px;
@@ -508,40 +650,145 @@ textarea {
   height: 100%;
 }
 
+.hover-drawer::after {
+  content: "账户";
+  position: absolute;
+  right: -42px;
+  top: 18px;
+  width: 42px;
+  min-height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--brand);
+  color: white;
+  font-weight: 800;
+  writing-mode: vertical-rl;
+  letter-spacing: 0;
+}
+
+.drawer-status {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.drawer-status span {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefa;
+  color: var(--muted);
+  padding: 8px;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.drawer-status span.open {
+  border-color: #8bc7bd;
+  background: #ecfffb;
+  color: var(--brand);
+}
+
 .hover-drawer:hover,
 .hover-drawer:focus-within {
   left: 0;
 }
 
 .bottom-nav {
-  display: none;
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 16;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(74px, 1fr));
+  gap: 0;
+  width: min(720px, calc(100% - 24px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 253, 248, 0.96);
+  box-shadow: 0 14px 34px rgba(23, 33, 31, 0.16);
+  padding: 6px;
+  overflow: hidden;
+}
+
+.bottom-nav button {
+  min-height: 54px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.bottom-nav button:first-child {
+  border-left: 0;
+}
+
+.bottom-nav span {
+  display: block;
+  font-size: 1rem;
+  margin-bottom: 2px;
+}
+
+.bottom-nav button.active {
+  background: var(--brand);
+  color: white;
+}
+
+.bottom-nav button:hover,
+.bottom-nav button:focus {
+  background: #ecfffb;
+  color: var(--brand);
+}
+
+.bottom-nav button.active:hover,
+.bottom-nav button.active:focus {
+  background: var(--brand);
+  color: white;
 }
 
 @media (max-width: 820px) {
   body {
-    padding-bottom: 76px;
-  }
-
-  .hover-drawer {
-    display: none;
+    padding-bottom: 86px;
   }
 
   .topbar {
     display: grid;
     align-items: start;
+    padding-bottom: 12px;
   }
 
   .market-pills {
-    justify-content: flex-start;
+    display: none;
+  }
+
+  .hover-drawer {
+    left: -236px;
+    top: 82px;
+    width: 248px;
+    border-radius: 0 8px 8px 0;
+  }
+
+  .hover-drawer:hover,
+  .hover-drawer:focus-within {
+    left: 0;
   }
 
   .summary-grid,
+  .account-snapshot,
   .workspace,
   .order-form,
   .chart-layout,
   .account-grid,
   .settings-grid,
-  .source-grid {
+  .source-grid,
+  .guide-grid,
+  .tree-stocks {
     grid-template-columns: 1fr;
   }
 
@@ -591,38 +838,41 @@ textarea {
     height: 340px;
   }
 
-  .bottom-nav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 16;
+  .stock-tree {
+    max-height: 360px;
+    overflow: auto;
+    padding-right: 2px;
+  }
+
+  .stock-tree-head {
     display: grid;
+  }
+
+  .tree-market summary,
+  .tree-sector summary {
+    min-height: 42px;
+  }
+
+  .tree-stocks button {
+    min-height: 44px;
+  }
+
+  .bottom-nav {
+    bottom: 0;
+    width: 100%;
     grid-template-columns: repeat(6, 1fr);
-    gap: 0;
-    border-top: 1px solid var(--line);
-    background: var(--white);
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
+    padding: 4px;
+    box-shadow: 0 -10px 24px rgba(23, 33, 31, 0.14);
   }
 
   .bottom-nav button {
     min-height: 58px;
-    border: 0;
-    background: transparent;
-    color: var(--muted);
-    font-size: 0.82rem;
-  }
-
-  .bottom-nav button::before {
-    content: "●";
-    display: block;
-    font-size: 0.62rem;
-    margin-bottom: 2px;
-  }
-
-  .bottom-nav button:focus,
-  .bottom-nav button:hover {
-    color: var(--brand);
-    background: #ecfffb;
+    border-radius: 0;
+    border-left: 1px solid var(--line);
   }
 }
 .risk-bar {
