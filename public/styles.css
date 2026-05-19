@@ -22,6 +22,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
+  padding-bottom: 0;
 }
 
 [hidden] {
@@ -124,6 +125,19 @@ h3 {
 
 .login-box p {
   color: var(--muted);
+}
+
+.checkline {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.checkline input {
+  width: auto;
 }
 
 .shell {
@@ -322,6 +336,24 @@ h3 {
   min-height: 420px;
 }
 
+.mini-stats {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mini-stats article {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 7px;
+}
+
+.mini-stats span {
+  color: var(--muted);
+}
+
 #klineCanvas {
   display: block;
   width: 100%;
@@ -450,7 +482,50 @@ textarea {
   margin: 0 auto 26px;
 }
 
+.hover-drawer {
+  position: fixed;
+  left: -210px;
+  top: 96px;
+  width: 230px;
+  z-index: 18;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--white);
+  box-shadow: 0 14px 38px rgba(23, 33, 31, 0.16);
+  transition: left 0.22s ease;
+}
+
+.hover-drawer::before {
+  content: "";
+  position: absolute;
+  right: -14px;
+  top: 0;
+  width: 14px;
+  height: 100%;
+}
+
+.hover-drawer:hover,
+.hover-drawer:focus-within {
+  left: 0;
+}
+
+.bottom-nav {
+  display: none;
+}
+
 @media (max-width: 820px) {
+  body {
+    padding-bottom: 76px;
+  }
+
+  .hover-drawer {
+    display: none;
+  }
+
   .topbar {
     display: grid;
     align-items: start;
@@ -471,8 +546,7 @@ textarea {
   }
 
   .tabs {
-    position: static;
-    grid-template-columns: repeat(4, 1fr);
+    display: none;
   }
 
   .tab {
@@ -516,4 +590,48 @@ textarea {
     min-height: 340px;
     height: 340px;
   }
+
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 16;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0;
+    border-top: 1px solid var(--line);
+    background: var(--white);
+  }
+
+  .bottom-nav button {
+    min-height: 58px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .bottom-nav button::before {
+    content: "●";
+    display: block;
+    font-size: 0.62rem;
+    margin-bottom: 2px;
+  }
+
+  .bottom-nav button:focus,
+  .bottom-nav button:hover {
+    color: var(--brand);
+    background: #ecfffb;
+  }
+}
+.risk-bar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: #fff1d6;
+  border-bottom: 1px solid #e7c982;
+  color: #5f4300;
+  padding: 8px clamp(14px, 4vw, 48px);
+  font-size: 0.88rem;
 }
