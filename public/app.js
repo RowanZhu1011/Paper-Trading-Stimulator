@@ -6,9 +6,9 @@ let sources = [];
 let currentUser = null;
 let authMode = "login";
 let selectedChartQuote = null;
+let remoteSaveTimer = null;
+let leaderboardRows = [];
 
-const STORE_USERS = "spl_users_v1";
-const STORE_SESSION = "spl_session_v1";
 const STORE_GUEST = "spl_guest_state_v1";
 
 const $ = (selector) => document.querySelector(selector);
@@ -29,18 +29,6 @@ async function api(path, options = {}) {
 
 function normalizeLogin(value) {
   return String(value || "").trim().toLowerCase();
-}
-
-function getUsers() {
-  try {
-    return JSON.parse(localStorage.getItem(STORE_USERS) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function saveUsers(users) {
-  localStorage.setItem(STORE_USERS, JSON.stringify(users));
 }
 
 function defaultState() {
@@ -84,30 +72,30 @@ function normalizeState(next) {
   return merged;
 }
 
-function loadLocalState() {
-  const session = localStorage.getItem(STORE_SESSION);
-  const users = getUsers();
-  const user = users.find((item) => item.username === session);
-  currentUser = user || null;
-  if (user) {
-    state = normalizeState(user.state);
-  } else {
-    state = normalizeState(JSON.parse(localStorage.getItem(STORE_GUEST) || "null"));
+async function loadSessionState() {
+  try {
+    const auth = await api("/api/auth/status");
+    currentUser = auth.authed ? auth.user : null;
+    if (currentUser) {
+      state = normalizeState(await api("/api/state"));
+      return;
+    }
+  } catch {
+    currentUser = null;
   }
-  persistState();
+  state = normalizeState(JSON.parse(localStorage.getItem(STORE_GUEST) || "null"));
 }
 
 function persistState() {
   state = normalizeState(state);
   if (currentUser) {
-    const users = getUsers();
-    const index = users.findIndex((item) => item.username === currentUser.username);
-    if (index >= 0) {
-      users[index].state = state;
-      users[index].updatedAt = new Date().toISOString();
-      saveUsers(users);
-      currentUser = users[index];
-    }
+    clearTimeout(remoteSaveTimer);
+    remoteSaveTimer = setTimeout(() => {
+      api("/api/state/save", {
+        method: "POST",
+        body: JSON.stringify({ state })
+      }).catch(() => showMessage("#accountMessage", "云端保存暂时失败，稍后会随下次操作重试。"));
+    }, 250);
   } else {
     localStorage.setItem(STORE_GUEST, JSON.stringify(state));
   }
@@ -125,7 +113,7 @@ function setAuthMode(mode) {
   authMode = mode;
   const registering = authMode === "register";
   $("#loginTitle").textContent = registering ? "注册模拟账户" : "登录模拟账户";
-  $("#loginHelp").textContent = registering ? "用手机号或邮箱作为用户名，注册即送 A股10万、美股1.5万模拟金。" : "输入手机号/邮箱和密码，加载你的本地模拟账户。";
+  $("#loginHelp").textContent = registering ? "用手机号或邮箱作为用户名，注册即送 A股10万、美股1.5万模拟金。" : "输入手机号/邮箱和密码，加载你的云端模拟账户。";
   $("#authModeBtn").textContent = registering ? "已有账户，去登录" : "注册新账户";
   const agree = $("#agreeWrap");
   if (agree) agree.hidden = !registering;
@@ -139,11 +127,10 @@ function updateAuthUI() {
   $("#drawerUser").textContent = currentUser ? currentUser.username : "游客模式";
 }
 
-function registerOrLogin(event) {
+async function registerOrLogin(event) {
   event.preventDefault();
   const username = normalizeLogin($("#usernameInput").value);
   const password = String($("#passwordInput").value || "").trim();
-  const users = getUsers();
   if (!username || password.length < 6) {
     $("#loginMessage").textContent = "请输入用户名，并设置至少 6 位密码。";
     return;
@@ -154,44 +141,60 @@ function registerOrLogin(event) {
       $("#loginMessage").textContent = "注册前请先勾选用户协议和风险提示。";
       return;
     }
-    if (users.some((item) => item.username === username)) {
-      $("#loginMessage").textContent = "这个账号已经注册，请直接登录。";
+    try {
+      const payload = await api("/api/auth/register", {
+        method: "POST",
+        body: JSON.stringify({ username, password })
+      });
+      currentUser = payload.user;
+      state = normalizeState(await api("/api/state"));
+      hideLogin();
+      await loadAfterAuth();
+      return;
+    } catch (error) {
+      $("#loginMessage").textContent = error.message;
       return;
     }
-    const user = {
-      username,
-      password,
-      state: normalizeState({ ...defaultState(), tasks: { registered: true, watch: false, order: false, journal: false } }),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    users.push(user);
-    saveUsers(users);
-    localStorage.setItem(STORE_SESSION, username);
-    currentUser = user;
-    state = user.state;
+  }
+  try {
+    const payload = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password })
+    });
+    currentUser = payload.user;
+    state = normalizeState(await api("/api/state"));
     hideLogin();
-    loadAfterAuth();
-    return;
+    await loadAfterAuth();
+  } catch (error) {
+    $("#loginMessage").textContent = error.message;
   }
-  const user = users.find((item) => normalizeLogin(item.username) === username && String(item.password).trim() === password);
-  if (!user) {
-    $("#loginMessage").textContent = "用户名或密码不正确。";
-    return;
-  }
-  localStorage.setItem(STORE_SESSION, user.username);
-  currentUser = user;
-  state = normalizeState(user.state);
-  hideLogin();
-  loadAfterAuth();
 }
 
-function guestMode() {
-  localStorage.removeItem(STORE_SESSION);
+async function forgotPassword() {
+  const username = normalizeLogin($("#usernameInput").value);
+  const password = String($("#passwordInput").value || "").trim();
+  if (!username || password.length < 6) {
+    $("#loginMessage").textContent = "在用户名框输入账号，在密码框输入新密码，至少 6 位。";
+    return;
+  }
+  try {
+    await api("/api/auth/forgot", {
+      method: "POST",
+      body: JSON.stringify({ username, password })
+    });
+    $("#loginMessage").textContent = "密码已重置，请直接登录。";
+    setAuthMode("login");
+  } catch (error) {
+    $("#loginMessage").textContent = error.message;
+  }
+}
+
+async function guestMode() {
+  await api("/api/auth/logout", { method: "POST" }).catch(() => {});
   currentUser = null;
-  loadLocalState();
+  state = normalizeState(JSON.parse(localStorage.getItem(STORE_GUEST) || "null"));
   hideLogin();
-  loadAfterAuth();
+  await loadAfterAuth();
 }
 
 function quoteBySymbol(symbol) {
@@ -249,6 +252,30 @@ function renderSummary() {
   $("#cashUsd").textContent = money(state.cash.USD, "USD");
   $("#totalPnl").textContent = money(aPnl + usPnl * usdToCny, "CNY");
   $("#totalPnl").className = aPnl + usPnl * usdToCny >= 0 ? "gain" : "loss";
+}
+
+function portfolioStats(targetState = state) {
+  let aValue = 0;
+  let usValue = 0;
+  let aPnl = 0;
+  let usPnl = 0;
+  for (const position of Object.values(targetState.positions || {})) {
+    const quote = quoteBySymbol(position.symbol);
+    const price = quote ? quote.price : position.avgCost;
+    const value = price * position.quantity;
+    const pnl = value - position.avgCost * position.quantity;
+    if (position.currency === "CNY") {
+      aValue += value;
+      aPnl += pnl;
+    } else {
+      usValue += value;
+      usPnl += pnl;
+    }
+  }
+  const usdToCny = targetState.settings ? targetState.settings.usdToCny : 7.2;
+  const totalCny = targetState.cash.CNY + aValue + (targetState.cash.USD + usValue) * usdToCny;
+  const initialCny = 100000 + 15000 * usdToCny;
+  return { aValue, usValue, aPnl, usPnl, totalCny, returnPct: ((totalCny - initialCny) / initialCny) * 100 };
 }
 
 function renderQuotes(sortMode = $("#quoteSort") ? $("#quoteSort").value : "default") {
@@ -309,6 +336,12 @@ function renderAccount() {
     const input = $(`#${key}`);
     if (input) input.value = value;
   }
+  const stats = portfolioStats();
+  $("#accountBreakdown").innerHTML = `
+    <article class="account-card"><span>A股资产</span><strong>${money(state.cash.CNY + stats.aValue, "CNY")}</strong><p>现金 ${money(state.cash.CNY, "CNY")} · 持仓 ${money(stats.aValue, "CNY")} · 盈亏 <span class="${stats.aPnl >= 0 ? "gain" : "loss"}">${money(stats.aPnl, "CNY")}</span></p></article>
+    <article class="account-card"><span>美股资产</span><strong>${money(state.cash.USD + stats.usValue, "USD")}</strong><p>现金 ${money(state.cash.USD, "USD")} · 持仓 ${money(stats.usValue, "USD")} · 盈亏 <span class="${stats.usPnl >= 0 ? "gain" : "loss"}">${money(stats.usPnl, "USD")}</span></p></article>
+  `;
+  renderLeaderboard();
 }
 
 function renderSources() {
@@ -373,13 +406,24 @@ function renderOrders() {
       <div class="sub">${order.status === "pending" ? `<button class="secondary danger" data-cancel-order="${order.id}">撤单</button>` : order.reason}</div>
     </article>
   `).join("") : `<p class="empty">暂无订单。</p>`;
-  document.querySelectorAll("[data-cancel-order]").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-cancel-order]").forEach((button) => button.addEventListener("click", async () => {
     const order = state.orders.find((item) => item.id === button.dataset.cancelOrder);
     if (order) {
-      order.status = "cancelled";
-      order.statusLabel = "已撤单";
-      order.cancelledAt = new Date().toISOString();
-      persistState();
+      if (currentUser) {
+        try {
+          state = normalizeState(await api("/api/cancel-order", {
+            method: "POST",
+            body: JSON.stringify({ id: order.id })
+          }));
+        } catch (error) {
+          return showMessage("#orderMessage", error.message);
+        }
+      } else {
+        order.status = "cancelled";
+        order.statusLabel = "已撤单";
+        order.cancelledAt = new Date().toISOString();
+        persistState();
+      }
       renderAll();
     }
   }));
@@ -403,11 +447,21 @@ function renderJournal() {
     <article class="history-item">
       <div><div class="name">${item.title}</div><div class="sub">${item.symbol || "NOTE"} · ${item.tag || "未标记"} · ${new Date(item.createdAt).toLocaleString("zh-CN")}</div></div>
       <div>${item.content}</div>
-      <div class="sub"><button class="secondary danger" data-delete-journal="${item.id}">删除</button></div>
+      <div class="sub"><button class="secondary" data-edit-journal="${item.id}">修改</button> <button class="secondary danger" data-delete-journal="${item.id}">删除</button></div>
     </article>
   `).join("") : `<p class="empty">还没有复盘。第一条可以写“我为什么想买这只股票”。</p>`;
   document.querySelectorAll("[data-delete-journal]").forEach((button) => button.addEventListener("click", () => {
     state.journal = state.journal.filter((item) => item.id !== button.dataset.deleteJournal);
+    persistState();
+    renderJournal();
+  }));
+  document.querySelectorAll("[data-edit-journal]").forEach((button) => button.addEventListener("click", () => {
+    const item = state.journal.find((entry) => entry.id === button.dataset.editJournal);
+    if (!item) return;
+    $("#journalTitle").value = item.title;
+    $("#journalContent").value = item.content;
+    $("#journalTag").value = item.tag || "观察";
+    state.journal = state.journal.filter((entry) => entry.id !== item.id);
     persistState();
     renderJournal();
   }));
@@ -422,7 +476,37 @@ function renderTasks() {
   ];
   const target = $("#taskList");
   if (!target) return;
-  target.innerHTML = tasks.map(([key, label, status]) => `<article class="source-card"><div class="name">${label}</div><p>${status}</p></article>`).join("");
+  target.innerHTML = tasks.map(([key, label, status]) => `<article class="source-card"><div class="name">${label}</div><p>${status}</p><p>${status === "已完成" ? "奖励已计入模拟金" : "完成后奖励模拟金"}</p></article>`).join("");
+}
+
+function rewardTask(key, cny = 1000, usd = 100) {
+  if (!currentUser || state.tasks[key]) return;
+  state.tasks[key] = true;
+  state.cash.CNY = Number((state.cash.CNY + cny).toFixed(2));
+  state.cash.USD = Number((state.cash.USD + usd).toFixed(2));
+  state.cashflows.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), currency: "CNY", type: "deposit", amount: cny, memo: `新手任务奖励：${key}` });
+}
+
+function renderLeaderboard() {
+  const target = $("#leaderboardList");
+  if (!target) return;
+  target.innerHTML = leaderboardRows.length ? leaderboardRows.map((row, index) => `
+    <article class="history-item">
+      <div><div class="name">#${index + 1} ${row.username}</div><div class="sub">总收益榜</div></div>
+      <div class="${row.returnPct >= 0 ? "gain" : "loss"}">${row.returnPct >= 0 ? "+" : ""}${pct(row.returnPct)}</div>
+      <div class="sub">总资产 ${money(row.totalCny, "CNY")}</div>
+    </article>
+  `).join("") : `<p class="empty">暂无排行榜数据。</p>`;
+}
+
+async function refreshLeaderboard() {
+  try {
+    const payload = await api("/api/leaderboard");
+    leaderboardRows = payload.rows || [];
+  } catch {
+    leaderboardRows = [];
+  }
+  renderLeaderboard();
 }
 
 function renderAll() {
@@ -438,17 +522,19 @@ function renderAll() {
 }
 
 async function loadAll() {
-  loadLocalState();
+  await loadSessionState();
   const [stockPayload, sourcePayload] = await Promise.all([api("/api/stocks"), api("/api/sources")]);
   stocks = stockPayload.stocks;
   sources = sourcePayload.sources;
   renderStockOptions();
+  await refreshLeaderboard();
   await refreshQuotes();
   await loadChart();
 }
 
 async function loadAfterAuth() {
   renderStockOptions();
+  await refreshLeaderboard();
   await refreshQuotes();
   await loadChart();
   renderAll();
@@ -573,7 +659,7 @@ function updateOrderPreview() {
   target.textContent = `${stock.market === "A" ? "A股100股/手、T+1、±10%涨跌停" : "美股1股起、无T+1/涨跌停"}；${open ? "当前模拟为交易时段" : "当前非交易时段，下单将挂为委托"}；预计费用 ${money(fee, stock.currency)}。`;
 }
 
-function placeOrder(event) {
+async function placeOrder(event) {
   event.preventDefault();
   if (!currentUser) {
     showLogin();
@@ -590,6 +676,30 @@ function placeOrder(event) {
   if (!reason) return showMessage("#orderMessage", "请先写下单理由。");
   if (!quantity || quantity <= 0 || quantity % stock.lotSize !== 0) return showMessage("#orderMessage", `${stock.market === "A" ? "A股" : "美股"}需要按 ${stock.lotSize} 股单位交易。`);
   if (stock.market === "A" && (price > quote.previousClose * 1.1 || price < quote.previousClose * 0.9)) return showMessage("#orderMessage", "价格超过 A 股 ±10% 涨跌停模拟范围。");
+  if (currentUser) {
+    try {
+      const result = await api("/api/order", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: stock.symbol,
+          side,
+          orderType,
+          limitPrice: price,
+          quantity,
+          reason
+        })
+      });
+      state = normalizeState(result.state);
+      rewardTask("order", 1000, 100);
+      $("#reasonInput").value = "";
+      showMessage("#orderMessage", result.order.status === "pending" ? "已提交委托，可在持仓页撤单。" : "订单已成交。");
+      renderAll();
+      activateTab("positions");
+      return;
+    } catch (error) {
+      return showMessage("#orderMessage", error.message);
+    }
+  }
   const amount = price * quantity;
   const fee = orderFee(stock, side, amount);
   const now = new Date().toISOString();
@@ -637,7 +747,7 @@ function placeOrder(event) {
     }
     state.cashflows.unshift({ id: crypto.randomUUID(), createdAt: now, currency: stock.currency, type: side, amount: Number((side === "buy" ? -(amount + fee) : amount - fee).toFixed(2)), memo: `${side === "buy" ? "买入" : "卖出"} ${stock.name}，费用 ${fee.toFixed(2)}` });
   }
-  state.tasks.order = true;
+  rewardTask("order", 1000, 100);
   persistState();
   $("#reasonInput").value = "";
   showMessage("#orderMessage", pending ? "已提交委托，可在持仓页撤单。" : "订单已成交。");
@@ -654,32 +764,50 @@ function saveJournal(event) {
   event.preventDefault();
   const title = $("#journalTitle").value.trim();
   const content = $("#journalContent").value.trim();
-  if (!title || !content) return;
+  if (!title || !content) {
+    showMessage("#orderMessage", "复盘标题和内容都必填。");
+    return;
+  }
   state.journal.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), title, content, tag: $("#journalTag").value, orderId: $("#journalOrder").value || "", symbol: $("#journalOrder").value || "NOTE" });
-  state.tasks.journal = true;
+  rewardTask("journal", 500, 50);
   persistState();
   $("#journalTitle").value = "";
   $("#journalContent").value = "";
   renderAll();
 }
 
-function deposit(event) {
+async function deposit(event) {
   event.preventDefault();
   const currency = $("#depositCurrency").value;
   const amount = Number($("#depositAmount").value);
   const step = currency === "CNY" ? 100 : 10;
   if (!amount || amount < step || amount % step !== 0) return showMessage("#accountMessage", `入金最小 ${step}，并按 ${step} 递增。`);
-  state.cash[currency] = Number((state.cash[currency] + amount).toFixed(2));
-  state.cashflows.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), currency, type: "deposit", amount, memo: `${currency === "CNY" ? "人民币" : "美元"}模拟入金` });
-  persistState();
+  if (currentUser) {
+    try {
+      state = normalizeState(await api("/api/deposit", {
+        method: "POST",
+        body: JSON.stringify({ currency, amount })
+      }));
+    } catch (error) {
+      return showMessage("#accountMessage", error.message);
+    }
+  } else {
+    state.cash[currency] = Number((state.cash[currency] + amount).toFixed(2));
+    state.cashflows.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), currency, type: "deposit", amount, memo: `${currency === "CNY" ? "人民币" : "美元"}模拟入金` });
+    persistState();
+  }
   showMessage("#accountMessage", "模拟入金成功。");
   renderAll();
 }
 
-function resetAccount() {
+async function resetAccount() {
   if (!confirm("确定重置账户吗？这会清空持仓、订单、复盘和资金流水。")) return;
-  state = defaultState();
-  persistState();
+  if (currentUser) {
+    state = normalizeState(await api("/api/reset", { method: "POST" }));
+  } else {
+    state = defaultState();
+    persistState();
+  }
   renderAll();
 }
 
@@ -687,14 +815,13 @@ document.querySelectorAll(".tab").forEach((button) => button.addEventListener("c
 document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.mobileTab)));
 document.querySelectorAll("[data-drawer-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.drawerTab)));
 $("#drawerLogout").addEventListener("click", () => {
-  localStorage.removeItem(STORE_SESSION);
   guestMode();
 });
 $("#loginForm").addEventListener("submit", registerOrLogin);
 $("#authModeBtn").addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
+$("#forgotBtn").addEventListener("click", forgotPassword);
 $("#guestBtn").addEventListener("click", guestMode);
 $("#logoutBtn").addEventListener("click", () => {
-  localStorage.removeItem(STORE_SESSION);
   guestMode();
 });
 $("#refreshBtn").addEventListener("click", refreshQuotes);
@@ -702,7 +829,7 @@ $("#quoteSort").addEventListener("change", () => renderQuotes($("#quoteSort").va
 $("#addWatchBtn").addEventListener("click", async () => {
   const symbol = $("#watchSymbol").value;
   if (!state.watchlist.includes(symbol)) state.watchlist.push(symbol);
-  state.tasks.watch = true;
+  rewardTask("watch", 500, 50);
   persistState();
   await refreshQuotes();
 });
@@ -716,18 +843,33 @@ $("#chartRange").addEventListener("change", loadChart);
 $("#orderForm").addEventListener("submit", placeOrder);
 ["symbolInput", "sideInput", "typeInput", "limitInput", "quantityInput"].forEach((id) => $(`#${id}`).addEventListener("input", updateOrderPreview));
 $("#depositForm").addEventListener("submit", deposit);
-$("#settingsForm").addEventListener("submit", (event) => {
+$("#settingsForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   for (const key of Object.keys(state.settings)) state.settings[key] = Number($(`#${key}`).value);
-  persistState();
+  if (currentUser) {
+    try {
+      state = normalizeState(await api("/api/settings", {
+        method: "POST",
+        body: JSON.stringify(state.settings)
+      }));
+    } catch (error) {
+      return showMessage("#accountMessage", error.message);
+    }
+  } else {
+    persistState();
+  }
   showMessage("#accountMessage", "费用参数已保存。");
 });
 $("#resetBtn").addEventListener("click", resetAccount);
-$("#rolloverBtn").addEventListener("click", () => {
-  Object.values(state.positions).forEach((position) => {
-    position.sellable = position.quantity;
-  });
-  persistState();
+$("#rolloverBtn").addEventListener("click", async () => {
+  if (currentUser) {
+    state = normalizeState(await api("/api/rollover", { method: "POST" }));
+  } else {
+    Object.values(state.positions).forEach((position) => {
+      position.sellable = position.quantity;
+    });
+    persistState();
+  }
   renderAll();
 });
 $("#journalForm").addEventListener("submit", saveJournal);
