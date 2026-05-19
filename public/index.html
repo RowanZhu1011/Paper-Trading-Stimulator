@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>模拟炒股训练场</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="stylesheet" href="/styles.css?v=11" />
+    <link rel="stylesheet" href="/styles.css?v=13" />
   </head>
-  <body>
+  <body data-tab="watch">
     <section id="loginOverlay" class="login-overlay" hidden>
       <form id="loginForm" class="login-box">
         <p class="eyebrow">Private Practice</p>
@@ -71,7 +71,8 @@
           <button class="tab" data-tab="positions">持仓</button>
           <button class="tab" data-tab="account">账户</button>
           <button class="tab" data-tab="sources">数据</button>
-          <button class="tab" data-tab="journal">复盘</button>
+          <button class="tab" data-tab="guide">教程</button>
+          <button class="tab" data-tab="records">记录</button>
         </nav>
 
         <section id="watch" class="panel active">
@@ -261,48 +262,76 @@
           <div id="sourceHitList" class="table-like"></div>
         </section>
 
-        <section id="journal" class="panel">
+        <section id="guide" class="panel">
           <div class="panel-head">
             <div>
-              <h2>复盘</h2>
-              <p>每一笔交易都留下理由，后面才能看见自己的模式。</p>
+              <h2>操作手册</h2>
+              <p>这是这个模拟交易网页的使用说明，先学会怎么操作，再慢慢理解股票基础。</p>
             </div>
           </div>
-          <form id="journalForm" class="journal-form">
-            <input id="journalTitle" placeholder="标题，例如：今天为什么想追高" />
-            <select id="journalTag">
-              <option value="观察">观察</option>
-              <option value="追涨">追涨</option>
-              <option value="抄底">抄底</option>
-              <option value="止损">止损</option>
-              <option value="纪律">纪律</option>
-            </select>
-            <select id="journalOrder">
-              <option value="">不关联订单</option>
-            </select>
-            <textarea id="journalContent" rows="4" placeholder="写下观察、情绪、计划和结果。"></textarea>
-            <button class="primary" type="submit">保存复盘</button>
-          </form>
-          <select id="journalFilter">
-            <option value="all">全部标签</option>
-            <option value="观察">观察</option>
-            <option value="追涨">追涨</option>
-            <option value="抄底">抄底</option>
-            <option value="止损">止损</option>
-            <option value="纪律">纪律</option>
-          </select>
-          <div id="journalList" class="history"></div>
+          <div class="guide-grid">
+            <article class="source-card">
+              <div class="name">1. 登录 / 注册</div>
+              <p>从左侧悬浮栏点“账号信息”进入登录。注册后，手机和电脑登录同一个账号会读取同一份模拟账户数据。</p>
+            </article>
+            <article class="source-card">
+              <div class="name">2. 添加自选</div>
+              <p>在自选页搜索股票，或从股票池按 A股/美股、行业分类展开，点具体股票加入自选。</p>
+            </article>
+            <article class="source-card">
+              <div class="name">3. 看图和下单</div>
+              <p>在图表页看K线和数字面板；在交易页选择股票、买卖方向、价格、数量，写一句下单理由后提交。</p>
+            </article>
+            <article class="source-card">
+              <div class="name">4. 看记录</div>
+              <p>记录页会自动整理所有操作，包括买卖、委托、撤单、入金和费用，不需要额外写长篇文字。</p>
+            </article>
+          </div>
+          <h3>页面入口说明</h3>
+          <div class="history">
+            <article class="history-item"><div class="name">自选</div><div>管理观察股票，查看现价、涨跌幅、成交量和数据来源。</div><div class="sub">适合每天第一眼打开</div></article>
+            <article class="history-item"><div class="name">账户</div><div>查看总资产、A股账户、美股账户、入金、费用参数和新手任务。</div><div class="sub">适合检查资金变化</div></article>
+            <article class="history-item"><div class="name">记录</div><div>自动生成操作时间线，用来回看自己每一步做了什么。</div><div class="sub">替代手写长文</div></article>
+          </div>
+          <h3>外部学习入口</h3>
+          <div class="source-grid">
+            <a class="source-card link-card" href="https://edu.sse.com.cn/" target="_blank" rel="noopener">上交所投资者教育</a>
+            <a class="source-card link-card" href="https://investor.szse.cn/" target="_blank" rel="noopener">深交所投资者教育</a>
+            <a class="source-card link-card" href="https://www.investor.gov/introduction-investing" target="_blank" rel="noopener">Investor.gov 投资入门</a>
+          </div>
+        </section>
+
+        <section id="records" class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>操作记录</h2>
+              <p>这里自动记录每次操作：什么时候做了什么、买卖了什么、理由是什么。</p>
+            </div>
+            <div class="actions">
+              <select id="recordFilter">
+                <option value="all">全部记录</option>
+                <option value="order">交易订单</option>
+                <option value="cash">资金流水</option>
+              </select>
+            </div>
+          </div>
+          <div id="recordList" class="history"></div>
         </section>
       </section>
     </main>
 
     <aside class="hover-drawer">
       <strong id="drawerUser">游客模式</strong>
-      <button class="secondary" id="drawerLogin">账号信息 / 登录</button>
-      <button class="secondary" id="drawerPassword">修改密码</button>
-      <button class="secondary" data-drawer-tab="journal">新手教程 / 复盘</button>
-      <button class="secondary" data-drawer-tab="account">系统设置 / 账户</button>
+      <div class="drawer-status">
+        <span id="drawerStatusA">A股</span>
+        <span id="drawerStatusUS">美股</span>
+      </div>
+      <button class="secondary" data-drawer-action="account">账号信息</button>
+      <button class="secondary" data-drawer-action="password">修改密码</button>
+      <button class="secondary" data-drawer-tab="guide">新手教程</button>
+      <button class="secondary" data-drawer-tab="account">账户设置</button>
       <button class="secondary" data-drawer-tab="sources">数据源</button>
+      <button class="secondary" data-drawer-tab="records">操作记录</button>
       <button class="secondary" id="drawerLogout">退出登录</button>
     </aside>
     <nav class="bottom-nav">
@@ -311,12 +340,12 @@
       <button data-mobile-tab="trade"><span>↕</span>交易</button>
       <button data-mobile-tab="positions"><span>▤</span>持仓</button>
       <button data-mobile-tab="account"><span>◎</span>账户</button>
-      <button data-mobile-tab="journal"><span>✎</span>复盘</button>
+      <button data-mobile-tab="records"><span>≡</span>记录</button>
     </nav>
     <footer class="footer">
       免责声明：这是学习用模拟环境，不构成投资建议。用户协议：仅供学习使用。隐私政策：游客数据仅保存在当前浏览器，登录账户数据会保存到云端数据库以支持多设备同步。
     </footer>
 
-    <script src="/app.js?v=11"></script>
+    <script src="/app.js?v=13"></script>
   </body>
 </html>
