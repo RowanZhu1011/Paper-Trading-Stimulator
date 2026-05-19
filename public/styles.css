@@ -413,6 +413,51 @@ body:not([data-tab="account"]) .account-snapshot {
   font-size: 0.78rem;
 }
 
+.selected-stock-panel {
+  margin-bottom: 18px;
+}
+
+.selected-stock-card,
+.favorite-row {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffefa;
+  padding: 12px;
+}
+
+.selected-stock-card {
+  grid-template-columns: minmax(150px, 1.2fr) minmax(120px, 0.8fr) minmax(210px, 1fr);
+  border-color: #9bc9c1;
+  background: #f4fbf8;
+}
+
+.selected-stock-card span,
+.selected-stock-card em {
+  display: block;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.84rem;
+}
+
+.selected-stock-card strong {
+  display: block;
+  font-size: 1.2rem;
+  margin: 3px 0;
+}
+
+.selected-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.favorite-row {
+  grid-template-columns: minmax(150px, 1.2fr) minmax(92px, 0.7fr) minmax(84px, 0.6fr) 190px;
+}
+
 .quote-row,
 .position-row,
 .history-item {
@@ -641,6 +686,10 @@ textarea {
   transition: left 0.22s ease;
 }
 
+.hover-drawer.open {
+  left: 0;
+}
+
 .hover-drawer::before {
   content: "";
   position: absolute;
@@ -648,25 +697,6 @@ textarea {
   top: 0;
   width: 14px;
   height: 100%;
-}
-
-.hover-drawer::after {
-  content: "账户";
-  position: absolute;
-  right: -42px;
-  top: 18px;
-  width: 42px;
-  min-height: 72px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-left: 0;
-  border-radius: 0 8px 8px 0;
-  background: var(--brand);
-  color: white;
-  font-weight: 800;
-  writing-mode: vertical-rl;
-  letter-spacing: 0;
 }
 
 .drawer-status {
@@ -694,6 +724,26 @@ textarea {
 .hover-drawer:hover,
 .hover-drawer:focus-within {
   left: 0;
+}
+
+.drawer-toggle {
+  position: fixed;
+  left: 0;
+  top: 114px;
+  z-index: 19;
+  width: 42px;
+  min-height: 72px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--brand);
+  color: white;
+  font-weight: 800;
+  writing-mode: vertical-rl;
+  letter-spacing: 0;
+  cursor: pointer;
 }
 
 .bottom-nav {
@@ -820,6 +870,8 @@ textarea {
   }
 
   .quote-row,
+  .favorite-row,
+  .selected-stock-card,
   .position-row,
   .history-item {
     grid-template-columns: 1fr 1fr;
@@ -827,9 +879,16 @@ textarea {
 
   .quote-row > div:first-child,
   .quote-row > .row-actions,
+  .favorite-row > div:first-child,
+  .favorite-row > .row-actions,
+  .selected-stock-card > div,
   .position-row > div:first-child,
   .history-item > div {
     grid-column: 1 / -1;
+  }
+
+  .selected-actions {
+    grid-template-columns: 1fr;
   }
 
   .chart-card,
@@ -855,6 +914,10 @@ textarea {
 
   .tree-stocks button {
     min-height: 44px;
+  }
+
+  .drawer-toggle {
+    top: 100px;
   }
 
   .bottom-nav {
