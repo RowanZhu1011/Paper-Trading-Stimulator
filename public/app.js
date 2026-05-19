@@ -8,6 +8,7 @@ let authMode = "login";
 let selectedChartQuote = null;
 let remoteSaveTimer = null;
 let leaderboardRows = [];
+let selectedStockTreeSymbol = "";
 
 const STORE_GUEST = "spl_guest_state_v1";
 
@@ -122,9 +123,12 @@ function setAuthMode(mode) {
 
 function updateAuthUI() {
   $("#logoutBtn").hidden = !currentUser;
+  $("#loginEntryBtn").hidden = Boolean(currentUser);
   $("#userPill").hidden = false;
   $("#userPill").textContent = currentUser ? currentUser.username : "游客模式";
   $("#drawerUser").textContent = currentUser ? currentUser.username : "游客模式";
+  $("#drawerLogout").hidden = !currentUser;
+  $("#drawerPassword").textContent = currentUser ? "修改密码" : "注册/登录";
 }
 
 async function registerOrLogin(event) {
@@ -252,6 +256,21 @@ function renderSummary() {
   $("#cashUsd").textContent = money(state.cash.USD, "USD");
   $("#totalPnl").textContent = money(aPnl + usPnl * usdToCny, "CNY");
   $("#totalPnl").className = aPnl + usPnl * usdToCny >= 0 ? "gain" : "loss";
+  const snapshot = $("#topAccountBreakdown");
+  if (snapshot) {
+    snapshot.innerHTML = `
+      <article>
+        <span>A股账户</span>
+        <strong>${money(state.cash.CNY + aValue, "CNY")}</strong>
+        <small>现金 ${money(state.cash.CNY, "CNY")} · 持仓 ${money(aValue, "CNY")} · 盈亏 <b class="${aPnl >= 0 ? "gain" : "loss"}">${money(aPnl, "CNY")}</b></small>
+      </article>
+      <article>
+        <span>美股账户</span>
+        <strong>${money(state.cash.USD + usValue, "USD")}</strong>
+        <small>现金 ${money(state.cash.USD, "USD")} · 持仓 ${money(usValue, "USD")} · 盈亏 <b class="${usPnl >= 0 ? "gain" : "loss"}">${money(usPnl, "USD")}</b></small>
+      </article>
+    `;
+  }
 }
 
 function portfolioStats(targetState = state) {
@@ -276,6 +295,58 @@ function portfolioStats(targetState = state) {
   const totalCny = targetState.cash.CNY + aValue + (targetState.cash.USD + usValue) * usdToCny;
   const initialCny = 100000 + 15000 * usdToCny;
   return { aValue, usValue, aPnl, usPnl, totalCny, returnPct: ((totalCny - initialCny) / initialCny) * 100 };
+}
+
+function groupedStocks() {
+  const tree = {};
+  for (const stock of stocks) {
+    const marketName = stock.market === "A" ? "A股" : "美股";
+    const sector = stock.sector || "其他";
+    tree[marketName] = tree[marketName] || {};
+    tree[marketName][sector] = tree[marketName][sector] || [];
+    tree[marketName][sector].push(stock);
+  }
+  return tree;
+}
+
+function renderStockTree(keyword = "") {
+  const target = $("#stockTree");
+  if (!target || !stocks.length) return;
+  const normalized = keyword.trim().toLowerCase();
+  const tree = groupedStocks();
+  target.innerHTML = Object.entries(tree).map(([market, sectors]) => `
+    <details class="tree-market" open>
+      <summary>${market}</summary>
+      ${Object.entries(sectors).map(([sector, items]) => {
+        const filtered = items.filter((stock) => !normalized || `${stock.name}${stock.symbol}${stock.sector}`.toLowerCase().includes(normalized));
+        if (!filtered.length) return "";
+        return `
+          <details class="tree-sector" open>
+            <summary>${sector} <span>${filtered.length}</span></summary>
+            <div class="tree-stocks">
+              ${filtered.map((stock) => `<button class="${selectedStockTreeSymbol === stock.symbol ? "active" : ""}" data-tree-stock="${stock.symbol}">
+                <strong>${stock.name}</strong><em>${stock.symbol}</em>
+              </button>`).join("")}
+            </div>
+          </details>
+        `;
+      }).join("")}
+    </details>
+  `).join("");
+  document.querySelectorAll("[data-tree-stock]").forEach((button) => button.addEventListener("click", async () => {
+    selectedStockTreeSymbol = button.dataset.treeStock;
+    $("#watchSymbol").value = selectedStockTreeSymbol;
+    $("#chartSymbol").value = selectedStockTreeSymbol;
+    $("#symbolInput").value = selectedStockTreeSymbol;
+    if (!state.watchlist.includes(selectedStockTreeSymbol)) {
+      state.watchlist.push(selectedStockTreeSymbol);
+      rewardTask("watch", 500, 50);
+      persistState();
+      await refreshQuotes();
+    } else {
+      renderStockTree($("#stockSearch").value);
+    }
+  }));
 }
 
 function renderQuotes(sortMode = $("#quoteSort") ? $("#quoteSort").value : "default") {
@@ -327,6 +398,7 @@ function renderStockOptions() {
   $("#symbolInput").innerHTML = optionHtml;
   $("#chartSymbol").innerHTML = optionHtml;
   $("#watchSymbol").innerHTML = optionHtml;
+  renderStockTree($("#stockSearch") ? $("#stockSearch").value : "");
 }
 
 function renderAccount() {
@@ -390,6 +462,16 @@ function renderPositions() {
     activateTab("chart");
     await loadChart();
   }));
+  const groups = {
+    A: positions.filter((position) => position.market === "A"),
+    US: positions.filter((position) => position.market === "US")
+  };
+  $("#positionGroups").innerHTML = ["A", "US"].map((market) => {
+    const list = groups[market];
+    const label = market === "A" ? "A股账户持仓" : "美股账户持仓";
+    if (!list.length) return `<article class="account-card"><span>${label}</span><strong>暂无持仓</strong><p>现金仍保留在对应账户。</p></article>`;
+    return `<article class="account-card"><span>${label}</span><strong>${list.length} 只</strong><p>${list.map((item) => `${item.name} ${item.quantity}股`).join(" · ")}</p></article>`;
+  }).join("");
   renderOrders();
   renderCashflows();
 }
@@ -554,6 +636,7 @@ async function refreshQuotes() {
 
 function activateTab(tabName) {
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
+  document.querySelectorAll("[data-mobile-tab]").forEach((tab) => tab.classList.toggle("active", tab.dataset.mobileTab === tabName));
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabName));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -814,6 +897,26 @@ async function resetAccount() {
 document.querySelectorAll(".tab").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.tab)));
 document.querySelectorAll("[data-mobile-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.mobileTab)));
 document.querySelectorAll("[data-drawer-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.drawerTab)));
+$("#loginEntryBtn").addEventListener("click", () => {
+  setAuthMode("login");
+  showLogin();
+});
+$("#userPill").addEventListener("click", () => {
+  if (currentUser) activateTab("account");
+  else showLogin();
+});
+$("#drawerLogin").addEventListener("click", () => {
+  if (currentUser) activateTab("account");
+  else {
+    setAuthMode("login");
+    showLogin();
+  }
+});
+$("#drawerPassword").addEventListener("click", () => {
+  setAuthMode(currentUser ? "login" : "register");
+  showLogin();
+  $("#loginMessage").textContent = currentUser ? "在用户名框填当前账号，在密码框填新密码，然后点“忘记密码”。" : "";
+});
 $("#drawerLogout").addEventListener("click", () => {
   guestMode();
 });
@@ -837,6 +940,7 @@ $("#stockSearch").addEventListener("input", () => {
   const keyword = $("#stockSearch").value.trim().toLowerCase();
   const filtered = stocks.filter((stock) => `${stock.name}${stock.symbol}`.toLowerCase().includes(keyword));
   $("#watchSymbol").innerHTML = filtered.map((stock) => `<option value="${stock.symbol}">${stock.name} · ${stock.symbol}</option>`).join("");
+  renderStockTree(keyword);
 });
 $("#chartSymbol").addEventListener("change", loadChart);
 $("#chartRange").addEventListener("change", loadChart);
