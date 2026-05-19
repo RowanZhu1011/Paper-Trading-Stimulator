@@ -16,11 +16,23 @@ const DATA_FILE = path.join(DATA_DIR, "state.json");
 const STOCKS = [
   { symbol: "600519.SH", yahoo: "600519.SS", name: "贵州茅台", market: "A", currency: "CNY", lotSize: 100, base: 1540 },
   { symbol: "300750.SZ", yahoo: "300750.SZ", name: "宁德时代", market: "A", currency: "CNY", lotSize: 100, base: 205 },
+  { symbol: "000001.SZ", yahoo: "000001.SZ", name: "平安银行", market: "A", currency: "CNY", lotSize: 100, base: 11 },
+  { symbol: "000333.SZ", yahoo: "000333.SZ", name: "美的集团", market: "A", currency: "CNY", lotSize: 100, base: 72 },
+  { symbol: "002594.SZ", yahoo: "002594.SZ", name: "比亚迪", market: "A", currency: "CNY", lotSize: 100, base: 220 },
+  { symbol: "601318.SH", yahoo: "601318.SS", name: "中国平安", market: "A", currency: "CNY", lotSize: 100, base: 48 },
+  { symbol: "600036.SH", yahoo: "600036.SS", name: "招商银行", market: "A", currency: "CNY", lotSize: 100, base: 39 },
   { symbol: "510300.SH", yahoo: "510300.SS", name: "沪深300ETF", market: "A", currency: "CNY", lotSize: 100, base: 3.8 },
   { symbol: "159915.SZ", yahoo: "159915.SZ", name: "创业板ETF", market: "A", currency: "CNY", lotSize: 100, base: 1.9 },
+  { symbol: "510500.SH", yahoo: "510500.SS", name: "中证500ETF", market: "A", currency: "CNY", lotSize: 100, base: 5.6 },
+  { symbol: "512100.SH", yahoo: "512100.SS", name: "中证1000ETF", market: "A", currency: "CNY", lotSize: 100, base: 2.4 },
   { symbol: "AAPL", yahoo: "AAPL", name: "Apple", market: "US", currency: "USD", lotSize: 1, base: 190 },
   { symbol: "MSFT", yahoo: "MSFT", name: "Microsoft", market: "US", currency: "USD", lotSize: 1, base: 420 },
   { symbol: "NVDA", yahoo: "NVDA", name: "NVIDIA", market: "US", currency: "USD", lotSize: 1, base: 980 },
+  { symbol: "GOOGL", yahoo: "GOOGL", name: "Alphabet", market: "US", currency: "USD", lotSize: 1, base: 170 },
+  { symbol: "AMZN", yahoo: "AMZN", name: "Amazon", market: "US", currency: "USD", lotSize: 1, base: 185 },
+  { symbol: "META", yahoo: "META", name: "Meta", market: "US", currency: "USD", lotSize: 1, base: 480 },
+  { symbol: "TSLA", yahoo: "TSLA", name: "Tesla", market: "US", currency: "USD", lotSize: 1, base: 180 },
+  { symbol: "BRK-B", yahoo: "BRK-B", name: "Berkshire Hathaway", market: "US", currency: "USD", lotSize: 1, base: 410 },
   { symbol: "SPY", yahoo: "SPY", name: "S&P 500 ETF", market: "US", currency: "USD", lotSize: 1, base: 520 },
   { symbol: "QQQ", yahoo: "QQQ", name: "Nasdaq 100 ETF", market: "US", currency: "USD", lotSize: 1, base: 445 }
 ];
@@ -271,6 +283,10 @@ function fallbackQuote(stock) {
     ...stock,
     price: Number(price.toFixed(stock.currency === "CNY" && price < 10 ? 3 : 2)),
     previousClose: Number(previousClose.toFixed(2)),
+    open: Number((previousClose * (1 + seededNoise(`${stock.symbol}-open`) * 0.25)).toFixed(2)),
+    high: Number((price * 1.012).toFixed(2)),
+    low: Number((price * 0.988).toFixed(2)),
+    volume: Math.round(1000000 + Math.abs(drift + minuteWave) * 100000000),
     change: Number(change.toFixed(2)),
     changePct: Number(((change / previousClose) * 100).toFixed(2)),
     time: new Date().toISOString(),
@@ -299,6 +315,10 @@ async function fetchYahoo(stock) {
     ...stock,
     price: Number(price.toFixed(stock.currency === "CNY" && price < 10 ? 3 : 2)),
     previousClose: Number(previousClose.toFixed(2)),
+    open: Number((meta.regularMarketOpen || previousClose).toFixed(2)),
+    high: Number((meta.regularMarketDayHigh || price).toFixed(2)),
+    low: Number((meta.regularMarketDayLow || price).toFixed(2)),
+    volume: Number(meta.regularMarketVolume || 0),
     change: Number(change.toFixed(2)),
     changePct: Number(previousClose ? ((change / previousClose) * 100).toFixed(2) : 0),
     time: new Date((meta.regularMarketTime || Date.now() / 1000) * 1000).toISOString(),
@@ -336,12 +356,19 @@ async function fetchEastmoneyQuote(stock) {
   if (!data) throw new Error("No Eastmoney quote");
   const price = eastmoneyPrice(data.f43, stock);
   const previousClose = eastmoneyPrice(data.f60, stock);
+  const open = eastmoneyPrice(data.f46, stock) || previousClose;
+  const high = eastmoneyPrice(data.f44, stock) || price;
+  const low = eastmoneyPrice(data.f45, stock) || price;
   if (!price || !previousClose) throw new Error("Invalid Eastmoney quote");
   const change = price - previousClose;
   return {
     ...stock,
     price: Number(price.toFixed(stock.currency === "CNY" && price < 10 ? 3 : 2)),
     previousClose: Number(previousClose.toFixed(2)),
+    open: Number(open.toFixed(stock.currency === "CNY" && open < 10 ? 3 : 2)),
+    high: Number(high.toFixed(stock.currency === "CNY" && high < 10 ? 3 : 2)),
+    low: Number(low.toFixed(stock.currency === "CNY" && low < 10 ? 3 : 2)),
+    volume: Number(data.f47 || 0),
     change: Number(change.toFixed(2)),
     changePct: Number(((change / previousClose) * 100).toFixed(2)),
     time: new Date().toISOString(),
@@ -385,6 +412,10 @@ async function fetchStooqQuote(stock) {
     ...stock,
     price: Number(price.toFixed(2)),
     previousClose: Number(open.toFixed(2)),
+    open: Number(open.toFixed(2)),
+    high: Number(Number(row.high || price).toFixed(2)),
+    low: Number(Number(row.low || price).toFixed(2)),
+    volume: Number(row.volume || 0),
     change: Number(change.toFixed(2)),
     changePct: Number(((change / open) * 100).toFixed(2)),
     time: new Date().toISOString(),
